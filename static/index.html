@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>법령 조문 검색 · 법제처</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-wash" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="brand-kicker">법제처 · 국가법령정보센터</p>
+          <h1 class="brand-title">법령 조문 검색</h1>
+        </div>
+      </div>
+      <a class="source-link" href="https://www.moleg.go.kr" target="_blank" rel="noopener noreferrer">
+        moleg.go.kr
+      </a>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <p class="hero-lead">
+          키워드나 문장으로 <em>관련 법률을 찾은 뒤</em>, 원하는 법률을 선택하면
+          <em>새 창</em>에서 그 법률·시행령·시행규칙만 다시 검색합니다.
+        </p>
+
+        <form id="search-form" class="search-form" autocomplete="off">
+          <label class="sr-only" for="query">검색어</label>
+          <div class="search-bar">
+            <input
+              id="query"
+              name="query"
+              type="search"
+              placeholder="예: 개인정보 수집, 근로시간, 음주운전"
+              maxlength="200"
+              required
+            />
+            <button type="submit" id="search-btn">법률 찾기</button>
+          </div>
+          <div class="chips" id="chips">
+            <button type="button" data-q="개인정보 보호">개인정보 보호</button>
+            <button type="button" data-q="근로시간">근로시간</button>
+            <button type="button" data-q="음주운전">음주운전</button>
+            <button type="button" data-q="산업안전">산업안전</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="status" class="status" hidden></section>
+      <section id="meta" class="meta" hidden></section>
+      <section id="law-list" class="law-list" aria-live="polite"></section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        데이터 출처:
+        <a href="https://www.law.go.kr" target="_blank" rel="noopener noreferrer">국가법령정보센터</a>
+        ·
+        <a href="https://open.law.go.kr" target="_blank" rel="noopener noreferrer">Open API</a>
+        · 법제처(<a href="https://www.moleg.go.kr" target="_blank" rel="noopener noreferrer">www.moleg.go.kr</a>)
+      </p>
+    </footer>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>

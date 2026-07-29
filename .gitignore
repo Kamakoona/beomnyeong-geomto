@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store
+tmp_out.txt
+_smoke_*.py
+*.log

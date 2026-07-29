@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>법령 3단 검색</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-wash" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="brand-kicker">선택한 법령 범위 검색</p>
+          <h1 class="brand-title" id="page-title">법령 3단 검색</h1>
+        </div>
+      </div>
+      <a class="source-link" href="/" target="_blank" rel="noopener noreferrer">법률 목록으로</a>
+    </header>
+
+    <main class="shell shell-wide">
+      <section class="hero law-scope-hero">
+        <p class="hero-lead" id="scope-lead">
+          이 창에서는 선택한 <em>법률 · 시행령 · 시행규칙</em> 안에서만
+          키워드나 문장으로 조문을 찾습니다.
+        </p>
+
+        <div class="scope-pill" id="scope-pill" hidden></div>
+
+        <form id="search-form" class="search-form" autocomplete="off">
+          <label class="sr-only" for="query">검색어</label>
+          <div class="search-bar" id="search-bar">
+            <input
+              id="query"
+              name="query"
+              type="search"
+              placeholder="이 법령 범위에서 찾을 키워드 또는 문장"
+              maxlength="200"
+              required
+            />
+            <button type="submit" id="search-btn">조문 검색</button>
+            <button type="button" id="open-all-btn" class="ghost-btn">전체 조문</button>
+          </div>
+          <div class="chips" id="chips"></div>
+        </form>
+      </section>
+
+      <section id="status" class="status" hidden></section>
+
+      <section id="workspace" class="workspace" hidden>
+        <div class="workspace-main">
+          <section id="meta" class="meta" hidden></section>
+          <section id="compare" class="compare" aria-live="polite"></section>
+        </div>
+
+        <aside id="copilot-panel" class="copilot-panel" aria-label="Copilot 질의응답">
+          <div class="copilot-head">
+            <div>
+              <p class="copilot-kicker">Microsoft Copilot</p>
+              <h2>검색 결과 질문하기</h2>
+              <p class="copilot-sub">왼쪽(위) 조문 결과를 바탕으로 질문할 수 있습니다.</p>
+            </div>
+            <button type="button" class="ghost-btn" id="copilot-clear">대화 초기화</button>
+          </div>
+
+          <div id="copilot-status" class="copilot-status" hidden></div>
+          <div id="copilot-thread" class="copilot-thread" aria-live="polite"></div>
+
+          <form id="copilot-form" class="copilot-form" autocomplete="off">
+            <label class="sr-only" for="copilot-input">Copilot에게 질문</label>
+            <textarea
+              id="copilot-input"
+              rows="3"
+              maxlength="2000"
+              placeholder="예: 이 조문들의 핵심 의무는 무엇인가요? 시행령과 법률의 차이는?"
+              required
+            ></textarea>
+            <button type="submit" id="copilot-send">질문하기</button>
+          </form>
+        </aside>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        데이터 출처:
+        <a href="https://www.law.go.kr" target="_blank" rel="noopener noreferrer">국가법령정보센터</a>
+        · 법제처(<a href="https://www.moleg.go.kr" target="_blank" rel="noopener noreferrer">www.moleg.go.kr</a>)
+      </p>
+    </footer>
+
+    <script src="/static/law.js" type="module"></script>
+  </body>
+</html>
