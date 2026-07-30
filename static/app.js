@@ -50,13 +50,39 @@ function openLawWindow(lawId, lawName, query) {
   }
 }
 
-function renderLawList(laws, query) {
+const INITIAL_LAW_LIMIT = 20;
+
+function lawCardHtml(law) {
+  return `
+    <button
+      type="button"
+      class="law-card"
+      data-open-law
+      data-law-id="${escapeHtml(law.lawId)}"
+      data-law-name="${escapeHtml(law.lawName)}"
+    >
+      <span class="badge ${escapeHtml(law.category)}">${escapeHtml(law.category)}</span>
+      <strong class="law-card-title">${escapeHtml(law.lawName)}</strong>
+      <span class="law-card-meta">
+        ${law.ministry ? `<span>${escapeHtml(law.ministry)}</span>` : ""}
+        ${law.effectiveDate ? `<span>시행 ${escapeHtml(law.effectiveDate)}</span>` : ""}
+        ${law.hitCount ? `<span>관련조문 힌트 ${law.hitCount}</span>` : ""}
+      </span>
+      <span class="law-card-action">새 창에서 검색 →</span>
+    </button>`;
+}
+
+function renderLawList(laws, query, { expanded = false } = {}) {
   if (!laws.length) {
     lawListEl.innerHTML = `<div class="empty">관련 법률을 찾지 못했습니다. 다른 키워드로 검색해 보세요.</div>`;
     return;
   }
 
   const statuteCount = laws.filter((l) => l.category === "법률").length;
+  const hasMore = laws.length > INITIAL_LAW_LIMIT;
+  const visible = expanded || !hasMore ? laws : laws.slice(0, INITIAL_LAW_LIMIT);
+  const remaining = laws.length - INITIAL_LAW_LIMIT;
+
   metaEl.hidden = false;
   metaEl.innerHTML = `
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
@@ -71,29 +97,21 @@ function renderLawList(laws, query) {
       <p class="law-list-sub">시행령·시행규칙을 골라도 대응 법률·시행령·시행규칙이 함께 3단으로 열립니다.</p>
     </div>
     <div class="law-grid">
-      ${laws
-        .map(
-          (law) => `
-          <button
-            type="button"
-            class="law-card"
-            data-open-law
-            data-law-id="${escapeHtml(law.lawId)}"
-            data-law-name="${escapeHtml(law.lawName)}"
-          >
-            <span class="badge ${escapeHtml(law.category)}">${escapeHtml(law.category)}</span>
-            <strong class="law-card-title">${escapeHtml(law.lawName)}</strong>
-            <span class="law-card-meta">
-              ${law.ministry ? `<span>${escapeHtml(law.ministry)}</span>` : ""}
-              ${law.effectiveDate ? `<span>시행 ${escapeHtml(law.effectiveDate)}</span>` : ""}
-              ${law.hitCount ? `<span>관련조문 힌트 ${law.hitCount}</span>` : ""}
-            </span>
-            <span class="law-card-action">새 창에서 검색 →</span>
-          </button>`
-        )
-        .join("")}
+      ${visible.map(lawCardHtml).join("")}
     </div>
+    ${
+      hasMore && !expanded
+        ? `<div class="law-list-more">
+            <button type="button" class="more-btn" data-show-more>
+              더 보기 <span class="more-count">(+${remaining})</span>
+            </button>
+          </div>`
+        : ""
+    }
   `;
+
+  lawListEl._laws = laws;
+  lawListEl._query = query;
 }
 
 async function runSearch(query) {
@@ -107,7 +125,7 @@ async function runSearch(query) {
   lawListEl.innerHTML = "";
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=30`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=80`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "검색에 실패했습니다.");
     setStatus("");
@@ -133,6 +151,14 @@ chips.addEventListener("click", (event) => {
 });
 
 lawListEl.addEventListener("click", (event) => {
+  const moreBtn = event.target.closest("[data-show-more]");
+  if (moreBtn) {
+    renderLawList(lawListEl._laws || [], lawListEl._query || input.value.trim(), {
+      expanded: true,
+    });
+    return;
+  }
+
   const card = event.target.closest("[data-open-law]");
   if (!card) return;
   openLawWindow(card.dataset.lawId, card.dataset.lawName, input.value.trim());
