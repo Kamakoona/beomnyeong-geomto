@@ -11,4 +11,4 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.10"
       - key: LAW_API_OC
-        sync: false
+        value: test
