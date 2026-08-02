@@ -302,7 +302,7 @@ function renderChatThread() {
   if (!chatHistory.length) {
     copilotThread.innerHTML = `
       <div class="copilot-empty">
-        검색이 끝나면 이 패널에서 조문 내용에 대해 Copilot에게 질문할 수 있습니다.
+        검색이 끝나면 이 패널에서 조문 내용에 대해 Claude에게 질문할 수 있습니다.
         <div class="copilot-suggests">
           <button type="button" data-copilot-q="핵심 의무와 금지사항을 요약해 주세요.">핵심 요약</button>
           <button type="button" data-copilot-q="법률과 시행령·시행규칙의 관계를 설명해 주세요.">법률·하위법령 관계</button>
@@ -314,7 +314,7 @@ function renderChatThread() {
 
   copilotThread.innerHTML = chatHistory
     .map((item) => {
-      const roleLabel = item.role === "user" ? "나" : "Copilot";
+      const roleLabel = item.role === "user" ? "나" : "Claude";
       return `
         <div class="copilot-msg is-${escapeHtml(item.role)}">
           <div class="copilot-msg-role">${roleLabel}</div>

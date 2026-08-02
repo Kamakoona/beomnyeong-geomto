@@ -5,15 +5,18 @@ from typing import Any
 
 import httpx
 
-OPENAI_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip()
-DEFAULT_MODEL = os.getenv("COPILOT_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+ANTHROPIC_URL = os.getenv(
+    "ANTHROPIC_BASE_URL",
+    "https://api.anthropic.com/v1/messages",
+).strip()
+ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01").strip()
+DEFAULT_MODEL = os.getenv("COPILOT_MODEL", os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5"))
 
 
 def get_copilot_key() -> str:
     return (
         os.getenv("COPILOT_API_KEY")
-        or os.getenv("OPENAI_API_KEY")
-        or os.getenv("AZURE_OPENAI_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
         or ""
     ).strip()
 
@@ -59,6 +62,20 @@ def build_search_context(payload: dict[str, Any], *, max_chars: int = 14000) -> 
     return text
 
 
+def _extract_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+        elif isinstance(block, str):
+            parts.append(block)
+    return "".join(parts).strip()
+
+
 async def ask_copilot(
     *,
     question: str,
@@ -68,19 +85,19 @@ async def ask_copilot(
     api_key = get_copilot_key()
     if not api_key:
         raise RuntimeError(
-            "COPILOT_API_KEY(또는 OPENAI_API_KEY)가 설정되지 않았습니다. "
-            ".env 파일에 OpenAI API 키를 넣어 주세요."
+            "COPILOT_API_KEY(또는 ANTHROPIC_API_KEY)가 설정되지 않았습니다. "
+            ".env 파일에 Anthropic API 키를 넣어 주세요."
         )
 
     system = (
-        "당신은 Microsoft Copilot 스타일의 대한민국 법령 해석 보조 AI입니다. "
+        "당신은 대한민국 법령 해석 보조 AI입니다. "
         "아래 제공된 검색 결과(법률·시행령·시행규칙 조문)를 근거로 한국어로 답하세요. "
         "조문을 인용할 때는 법령명과 조문번호를 밝히세요. "
         "검색 결과에 없는 내용은 추측하지 말고, 일반론과 검색결과 근거를 구분하세요. "
         "법적 조언의 확정이 아니라 참고용 설명임을 필요 시 짧게 알리세요."
     )
 
-    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    messages: list[dict[str, str]] = []
     for item in history or []:
         role = item.get("role")
         content = (item.get("content") or "").strip()
@@ -95,55 +112,43 @@ async def ask_copilot(
     )
     messages.append({"role": "user", "content": user_prompt})
 
+    # Anthropic Messages API는 user/assistant가 번갈아 와야 함
+    normalized: list[dict[str, str]] = []
+    for msg in messages:
+        if normalized and normalized[-1]["role"] == msg["role"]:
+            normalized[-1]["content"] += "\n\n" + msg["content"]
+        else:
+            normalized.append(dict(msg))
+    if normalized and normalized[0]["role"] != "user":
+        normalized.insert(0, {"role": "user", "content": "(이전 대화 이어가기)"})
+
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
         "Content-Type": "application/json",
     }
     body = {
         "model": DEFAULT_MODEL,
-        "messages": messages,
-        "temperature": 0.2,
         "max_tokens": 1600,
+        "temperature": 0.2,
+        "system": system,
+        "messages": normalized,
     }
 
-    # Azure OpenAI 사용 시
-    azure_endpoint = (os.getenv("AZURE_OPENAI_ENDPOINT") or "").rstrip("/")
-    azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT") or ""
-    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION") or "2024-10-21"
-    if azure_endpoint and azure_deployment:
-        url = (
-            f"{azure_endpoint}/openai/deployments/{azure_deployment}/chat/completions"
-            f"?api-version={azure_api_version}"
-        )
-        headers = {
-            "api-key": api_key,
-            "Content-Type": "application/json",
-        }
-        body = {
-            "messages": messages,
-            "temperature": 0.2,
-            "max_tokens": 1600,
-        }
-    else:
-        url = OPENAI_URL
-
     async with httpx.AsyncClient(timeout=90.0) as client:
-        response = await client.post(url, headers=headers, json=body)
+        response = await client.post(ANTHROPIC_URL, headers=headers, json=body)
         if response.status_code >= 400:
             detail = response.text[:500]
-            raise RuntimeError(f"Copilot(OpenAI) API 오류 ({response.status_code}): {detail}")
+            raise RuntimeError(f"Claude API 오류 ({response.status_code}): {detail}")
         data = response.json()
 
-    choices = data.get("choices") or []
-    answer = ""
-    if choices:
-        message = choices[0].get("message") or {}
-        answer = (message.get("content") or "").strip()
+    answer = _extract_text(data.get("content"))
     if not answer:
         answer = "(응답이 비어 있습니다.)"
 
+    usage = data.get("usage") or {}
     return {
         "answer": answer,
         "model": data.get("model") or DEFAULT_MODEL,
-        "usage": data.get("usage") or {},
+        "usage": usage,
     }

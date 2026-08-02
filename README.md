@@ -25,11 +25,12 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ```env
 LAW_API_OC=test
-COPILOT_API_KEY=sk-...
+COPILOT_API_KEY=sk-ant-...
 ```
 
 - `LAW_API_OC`: [open.law.go.kr](https://open.law.go.kr) 가입 후 발급 (테스트는 `test`)
-- `COPILOT_API_KEY`: Copilot(OpenAI) 질문 기능용 ([발급](https://platform.openai.com/api-keys))
+- `COPILOT_API_KEY`: Claude(Anthropic) 질문 기능용 ([발급](https://console.anthropic.com/settings/keys))
+- `COPILOT_MODEL`: 선택, 기본 `claude-sonnet-4-5`
 
 `.env`는 GitHub에 올리지 마세요.
 
@@ -57,7 +58,7 @@ COPILOT_API_KEY=sk-...
 ## 주요 기능
 
 1. 키워드로 관련 법령 목록 조회 후 선택
-2. 새 창에서 법률·시행령·시행규칙 3단 조문 검색
+2. 새 탭에서 법률·시행령·시행규칙 3단 조문 검색
 3. `전체 조문`으로 키워드 없이 전체 조문 3단 보기
 4. 현행/시행예정 표시, 수식·표 이미지 표시
-5. Copilot 패널에서 조문 관련 질의응답
+5. Claude 패널에서 조문 관련 질의응답

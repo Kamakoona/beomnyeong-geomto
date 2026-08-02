@@ -34,20 +34,21 @@ function openLawWindow(lawId, lawName, query) {
   });
   if (query) params.set("q", query);
   const url = `/law?${params.toString()}`;
-  const features = "noopener,noreferrer,width=1400,height=900";
-  const win = window.open(url, `law-${lawId}`, features);
-  if (!win) {
-    setStatus("팝업이 차단되었습니다. 브라우저에서 팝업을 허용하거나 링크를 새 탭으로 열어 주세요.", true);
-    // fallback: same-tab navigation hint via temporary link
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.target = "_blank";
-    anchor.rel = "noopener noreferrer";
-    anchor.textContent = `「${lawName}」 새 창에서 열기`;
-    anchor.className = "fallback-link";
-    statusEl.appendChild(document.createElement("br"));
-    statusEl.appendChild(anchor);
+  // 세 번째 인자(features)를 주면 브라우저가 팝업 창으로 여는 경우가 많아, 새 탭용으로 생략한다.
+  const win = window.open(url, "_blank");
+  if (win) {
+    win.opener = null;
+    return;
   }
+  setStatus("팝업이 차단되었습니다. 브라우저에서 팝업을 허용하거나 링크를 새 탭으로 열어 주세요.", true);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.textContent = `「${lawName}」 새 탭에서 열기`;
+  anchor.className = "fallback-link";
+  statusEl.appendChild(document.createElement("br"));
+  statusEl.appendChild(anchor);
 }
 
 const INITIAL_LAW_LIMIT = 20;
@@ -68,7 +69,7 @@ function lawCardHtml(law) {
         ${law.effectiveDate ? `<span>시행 ${escapeHtml(law.effectiveDate)}</span>` : ""}
         ${law.hitCount ? `<span>관련조문 힌트 ${law.hitCount}</span>` : ""}
       </span>
-      <span class="law-card-action">새 창에서 검색 →</span>
+      <span class="law-card-action">새 탭에서 검색 →</span>
     </button>`;
 }
 
@@ -88,7 +89,7 @@ function renderLawList(laws, query, { expanded = false } = {}) {
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
     <span class="pill">관련 법령 ${laws.length}건</span>
     ${statuteCount ? `<span class="pill">법률 ${statuteCount}건</span>` : ""}
-    <span class="hint">법률·시행령·시행규칙 중 하나를 선택하면 새 창에서 3단으로 검색합니다</span>
+    <span class="hint">법률·시행령·시행규칙 중 하나를 선택하면 새 탭에서 3단으로 검색합니다</span>
   `;
 
   lawListEl.innerHTML = `
