@@ -74,8 +74,8 @@ if errorlevel 1 (
 
 powershell -NoProfile -Command "try { $c = Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction Stop; if ($c) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 (
-  echo 서버가 이미 실행 중입니다. 브라우저를 엽니다.
-  start "" "%URL%"
+  echo 서버가 이미 실행 중입니다. 새 창에서 검색 화면을 엽니다.
+  call :open_search_window
   pause
   exit /b 0
 )
@@ -86,7 +86,7 @@ echo  주소: %URL%
 echo  종료하려면 이 창에서 Ctrl+C 를 누르세요.
 echo.
 
-start "" "%URL%"
+call :open_search_window
 "%VENV_UVICORN%" app.main:app --host 127.0.0.1 --port %PORT%
 set "ERR=%ERRORLEVEL%"
 
@@ -96,3 +96,25 @@ if not "%ERR%"=="0" (
 )
 echo 서버가 종료되었습니다.
 pause
+exit /b %ERR%
+
+:open_search_window
+REM 최초 키워드 검색 화면을 브라우저 새 창으로 연다.
+if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
+  start "" "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --new-window "%URL%"
+  exit /b 0
+)
+if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
+  start "" "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" --new-window "%URL%"
+  exit /b 0
+)
+if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
+  start "" "%ProgramFiles%\Google\Chrome\Application\chrome.exe" --new-window "%URL%"
+  exit /b 0
+)
+if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" (
+  start "" "%LocalAppData%\Google\Chrome\Application\chrome.exe" --new-window "%URL%"
+  exit /b 0
+)
+start "" "%URL%"
+exit /b 0

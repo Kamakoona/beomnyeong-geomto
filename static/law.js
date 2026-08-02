@@ -34,8 +34,8 @@ function openFullArticlesWindow() {
     lawName: lawName || "",
   });
   const url = `/law?${next.toString()}`;
-  const features = "noopener,noreferrer,width=1400,height=900";
-  const win = window.open(url, `law-full-${lawId}`, features);
+  // 전체 조문도 새 탭으로 연다 (features를 주면 팝업 창이 됨)
+  const win = window.open(url, "_blank");
   if (win) win.opener = null;
 }
 
@@ -502,7 +502,7 @@ function setupPage() {
     scopeLead.innerHTML = `
       <em>${escapeHtml(lawName || "선택한 법률")}</em>과 그
       <em>시행령 · 시행규칙</em> 안에서만 키워드나 문장으로 조문을 검색합니다.
-      <em>전체 조문</em>을 누르면 키워드와 무관하게 전체 조문을 새 창에서 볼 수 있습니다.
+      <em>전체 조문</em>을 누르면 키워드와 무관하게 전체 조문을 새 탭에서 볼 수 있습니다.
     `;
   }
 

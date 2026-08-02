@@ -32,7 +32,7 @@ async def index() -> FileResponse:
 
 @app.get("/law")
 async def law_page() -> FileResponse:
-    """선택한 법률 범위에서 다시 검색하는 새 창 페이지."""
+    """선택한 법률 범위에서 다시 검색하는 새 탭 페이지."""
     return FileResponse(STATIC_DIR / "law.html")
 
 
