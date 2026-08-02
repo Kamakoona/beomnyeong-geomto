@@ -62,36 +62,8 @@
       <section id="status" class="status" hidden></section>
 
       <section id="workspace" class="workspace" hidden>
-        <div class="workspace-main">
-          <section id="meta" class="meta" hidden></section>
-          <section id="compare" class="compare" aria-live="polite"></section>
-        </div>
-
-        <aside id="copilot-panel" class="copilot-panel" aria-label="Claude 질의응답">
-          <div class="copilot-head">
-            <div>
-              <p class="copilot-kicker">Claude</p>
-              <h2>검색 결과 질문하기</h2>
-              <p class="copilot-sub">왼쪽(위) 조문 결과를 바탕으로 질문할 수 있습니다.</p>
-            </div>
-            <button type="button" class="ghost-btn" id="copilot-clear">대화 초기화</button>
-          </div>
-
-          <div id="copilot-status" class="copilot-status" hidden></div>
-          <div id="copilot-thread" class="copilot-thread" aria-live="polite"></div>
-
-          <form id="copilot-form" class="copilot-form" autocomplete="off">
-            <label class="sr-only" for="copilot-input">Claude에게 질문</label>
-            <textarea
-              id="copilot-input"
-              rows="3"
-              maxlength="2000"
-              placeholder="예: 이 조문들의 핵심 의무는 무엇인가요? 시행령과 법률의 차이는?"
-              required
-            ></textarea>
-            <button type="submit" id="copilot-send">질문하기</button>
-          </form>
-        </aside>
+        <section id="meta" class="meta" hidden></section>
+        <section id="compare" class="compare" aria-live="polite"></section>
       </section>
     </main>
 

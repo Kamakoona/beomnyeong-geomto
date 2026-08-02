@@ -18,18 +18,10 @@ const pageTitle = document.getElementById("page-title");
 const scopePill = document.getElementById("scope-pill");
 const scopeLead = document.getElementById("scope-lead");
 const workspaceEl = document.getElementById("workspace");
-const copilotThread = document.getElementById("copilot-thread");
-const copilotForm = document.getElementById("copilot-form");
-const copilotInput = document.getElementById("copilot-input");
-const copilotSend = document.getElementById("copilot-send");
-const copilotClear = document.getElementById("copilot-clear");
-const copilotStatus = document.getElementById("copilot-status");
 
 const COLUMN_ORDER = ["법률", "시행령", "시행규칙"];
 
 let currentQuery = "";
-let latestSearchData = null;
-let chatHistory = [];
 
 function openFullArticlesWindow() {
   if (!lawId) {
@@ -286,97 +278,11 @@ function articleCard(article, query) {
   `;
 }
 
-function setCopilotStatus(message, isError = false) {
-  if (!message) {
-    copilotStatus.hidden = true;
-    copilotStatus.textContent = "";
-    copilotStatus.classList.remove("error");
-    return;
-  }
-  copilotStatus.hidden = false;
-  copilotStatus.textContent = message;
-  copilotStatus.classList.toggle("error", isError);
-}
-
-function renderChatThread() {
-  if (!chatHistory.length) {
-    copilotThread.innerHTML = `
-      <div class="copilot-empty">
-        검색이 끝나면 이 패널에서 조문 내용에 대해 Claude에게 질문할 수 있습니다.
-        <div class="copilot-suggests">
-          <button type="button" data-copilot-q="핵심 의무와 금지사항을 요약해 주세요.">핵심 요약</button>
-          <button type="button" data-copilot-q="법률과 시행령·시행규칙의 관계를 설명해 주세요.">법률·하위법령 관계</button>
-          <button type="button" data-copilot-q="실무에서 주의할 점을 알려 주세요.">실무 주의점</button>
-        </div>
-      </div>`;
-    return;
-  }
-
-  copilotThread.innerHTML = chatHistory
-    .map((item) => {
-      const roleLabel = item.role === "user" ? "나" : "Claude";
-      return `
-        <div class="copilot-msg is-${escapeHtml(item.role)}">
-          <div class="copilot-msg-role">${roleLabel}</div>
-          <div class="copilot-msg-body">${escapeHtml(item.content)}</div>
-        </div>`;
-    })
-    .join("");
-  copilotThread.scrollTop = copilotThread.scrollHeight;
-}
-
-function resetCopilotChat(message) {
-  chatHistory = [];
-  renderChatThread();
-  if (message) setCopilotStatus(message);
-  else setCopilotStatus("");
-}
-
-async function askCopilot(question) {
-  const q = question.trim();
-  if (!q) return;
-  if (!latestSearchData) {
-    setCopilotStatus("먼저 조문 검색을 완료해 주세요.", true);
-    return;
-  }
-
-  chatHistory.push({ role: "user", content: q });
-  renderChatThread();
-  copilotSend.disabled = true;
-  copilotSend.textContent = "답변 중…";
-  setCopilotStatus("Copilot이 검색 결과를 바탕으로 답변하는 중입니다…");
-
-  try {
-    const res = await fetch("/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: q,
-        searchContext: latestSearchData,
-        history: chatHistory.slice(0, -1).slice(-8),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Copilot 질문에 실패했습니다.");
-    chatHistory.push({ role: "assistant", content: data.answer || "" });
-    renderChatThread();
-    setCopilotStatus(data.model ? `모델: ${data.model}` : "");
-  } catch (err) {
-    chatHistory.pop();
-    renderChatThread();
-    setCopilotStatus(err.message || "Copilot 호출 중 오류가 발생했습니다.", true);
-  } finally {
-    copilotSend.disabled = false;
-    copilotSend.textContent = "질문하기";
-  }
-}
-
 function renderCompare(data) {
   const baseName = data.baseLaw?.lawName || lawName || "선택한 법률";
   const isFull = data.mode === "full";
   const query = isFull ? "" : data.query || currentQuery;
   currentQuery = query;
-  latestSearchData = data;
 
   pageTitle.textContent = isFull ? `${baseName} · 전체 조문` : baseName;
   document.title = isFull ? `${baseName} · 전체 조문` : `${baseName} · 3단 검색`;
@@ -405,8 +311,8 @@ function renderCompare(data) {
     ? `「${escapeHtml(baseName)}」 전체 조문`
     : `「${escapeHtml(baseName)}」 관련 조문`;
   const scopeDescription = isFull
-    ? "선택한 법률과 대응 시행령·시행규칙의 전체 조문을 키워드 필터 없이 표시합니다. 오른쪽 패널에서 Copilot에게 질문할 수 있습니다."
-    : `노란색 표시는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 오른쪽 패널에서 Copilot에게 질문할 수 있습니다.`;
+    ? "선택한 법률과 대응 시행령·시행규칙의 전체 조문을 키워드 필터 없이 표시합니다."
+    : `노란색 표시는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다.`;
 
   compareEl.innerHTML = `
     <div class="compare-toolbar">
@@ -459,9 +365,6 @@ function renderCompare(data) {
       }).join("")}
     </div>
   `;
-
-  resetCopilotChat("");
-  setCopilotStatus(isFull ? "전체 조문을 바탕으로 질문해 보세요." : "검색 결과를 바탕으로 질문해 보세요.");
 }
 
 async function refreshArticle(articleEl) {
@@ -498,14 +401,12 @@ async function runScopedSearch(query) {
   if (!q || !lawId) return;
 
   currentQuery = q;
-  latestSearchData = null;
   button.disabled = true;
   button.textContent = "검색 중…";
   setStatus(`「${lawName || "선택 법률"}」 범위에서 조문을 찾는 중입니다…`);
   workspaceEl.hidden = false;
   metaEl.hidden = true;
   compareEl.innerHTML = `<div class="empty">조문을 불러오는 중…</div>`;
-  resetCopilotChat("검색이 끝나면 질문할 수 있습니다.");
 
   const next = new URL(location.href);
   next.searchParams.set("q", q);
@@ -536,7 +437,6 @@ async function runScopedSearch(query) {
 async function runFullArticles() {
   if (!lawId) return;
 
-  latestSearchData = null;
   currentQuery = "";
   if (openAllBtn) {
     openAllBtn.disabled = true;
@@ -546,7 +446,6 @@ async function runFullArticles() {
   workspaceEl.hidden = false;
   metaEl.hidden = true;
   compareEl.innerHTML = `<div class="empty">전체 조문을 불러오는 중…</div>`;
-  resetCopilotChat("전체 조문을 불러온 뒤 질문할 수 있습니다.");
 
   try {
     const searchParams = new URLSearchParams({
@@ -622,8 +521,6 @@ function setupPage() {
     .map((q) => `<button type="button" data-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`)
     .join("");
 
-  renderChatThread();
-
   if (mode === "full") {
     runFullArticles();
   } else if (initialQuery) {
@@ -642,24 +539,6 @@ chipsEl.addEventListener("click", (event) => {
   if (!target) return;
   input.value = target.dataset.q;
   runScopedSearch(target.dataset.q);
-});
-
-copilotForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const q = copilotInput.value.trim();
-  if (!q) return;
-  copilotInput.value = "";
-  askCopilot(q);
-});
-
-copilotClear.addEventListener("click", () => {
-  resetCopilotChat("대화를 초기화했습니다.");
-});
-
-copilotThread.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-copilot-q]");
-  if (!btn) return;
-  askCopilot(btn.dataset.copilotQ);
 });
 
 compareEl.addEventListener("click", (event) => {

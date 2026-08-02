@@ -8,9 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 
-from app.copilot import ask_copilot, build_search_context, get_copilot_key
 from app.law_client import (
     HTTP_HEADERS,
     compare_three_tier_full,
@@ -43,41 +41,6 @@ async def health() -> dict:
     return {
         "ok": True,
         "oc": os.getenv("LAW_API_OC", "test"),
-        "copilotConfigured": bool(get_copilot_key()),
-    }
-
-
-class AskRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
-    searchContext: dict = Field(default_factory=dict)
-    history: list[dict[str, str]] = Field(default_factory=list)
-
-
-@app.post("/api/ask")
-async def ask(body: AskRequest) -> dict:
-    question = body.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="질문을 입력해 주세요.")
-    if not body.searchContext:
-        raise HTTPException(status_code=400, detail="검색 결과가 없습니다. 먼저 조문을 검색해 주세요.")
-
-    try:
-        context = build_search_context(body.searchContext)
-        result = await ask_copilot(
-            question=question,
-            context=context,
-            history=body.history[-8:],
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Copilot 호출 실패: {exc}") from exc
-
-    return {
-        "question": question,
-        "answer": result["answer"],
-        "model": result.get("model"),
-        "usage": result.get("usage") or {},
     }
 
 

@@ -12,5 +12,3 @@ services:
         value: "3.12.10"
       - key: LAW_API_OC
         sync: false
-      - key: COPILOT_API_KEY
-        sync: false

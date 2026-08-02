@@ -25,12 +25,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ```env
 LAW_API_OC=test
-COPILOT_API_KEY=sk-ant-...
 ```
 
 - `LAW_API_OC`: [open.law.go.kr](https://open.law.go.kr) 가입 후 발급 (테스트는 `test`)
-- `COPILOT_API_KEY`: Claude(Anthropic) 질문 기능용 ([발급](https://console.anthropic.com/settings/keys))
-- `COPILOT_MODEL`: 선택, 기본 `claude-sonnet-4-5`
 
 `.env`는 GitHub에 올리지 마세요.
 
@@ -45,7 +42,6 @@ COPILOT_API_KEY=sk-ant-...
 3. 이 GitHub 저장소 선택 (`render.yaml` 자동 인식)
 4. 환경변수 입력:
    - `LAW_API_OC`
-   - `COPILOT_API_KEY` (선택, 질문 기능용)
 5. **Apply** 후 배포 완료되면 `https://xxxx.onrender.com` 주소로 접속
 
 수동 배포를 원하면 **Web Service**로 만들고 다음을 입력하세요.
@@ -61,4 +57,3 @@ COPILOT_API_KEY=sk-ant-...
 2. 새 탭에서 법률·시행령·시행규칙 3단 조문 검색
 3. `전체 조문`으로 키워드 없이 전체 조문 3단 보기
 4. 현행/시행예정 표시, 수식·표 이미지 표시
-5. Claude 패널에서 조문 관련 질의응답
