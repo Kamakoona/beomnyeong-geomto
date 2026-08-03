@@ -244,8 +244,12 @@ async function runSearch(query) {
     if (!res.ok) throw new Error(data.detail || "검색에 실패했습니다.");
     if (controller.signal.aborted) return;
     setStatus("");
-    const laws = Array.isArray(data.laws) ? data.laws : [];
-    latestOrdinances = Array.isArray(data.ordinances) ? data.ordinances : [];
+    const laws = (Array.isArray(data.laws) ? data.laws : []).filter(
+      (law) => Number(law?.hitCount || 0) > 0
+    );
+    latestOrdinances = (Array.isArray(data.ordinances) ? data.ordinances : []).filter(
+      (item) => Number(item?.hitCount || 0) > 0
+    );
     renderLawList(laws, data.query || q, { expanded: false });
     if (latestOrdinances.length) {
       showOrdinancePrompt(data.query || q, latestOrdinances);

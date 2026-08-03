@@ -97,7 +97,7 @@
                 window.__ordinBoot(d);
                 return;
               }
-              const items = d.ordinances || [];
+              const items = (d.ordinances || []).filter((item) => Number(item?.hitCount || 0) > 0);
               if (status) {
                 status.hidden = true;
                 status.textContent = "";

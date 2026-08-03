@@ -29,7 +29,7 @@ STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
 # 크롬 등 강한 캐시를 피하기 위해 배포마다 경로를 바꿈
-APP_BUILD = "20260803m"
+APP_BUILD = "20260803n"
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
 HEAD_INJECT = (
     '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'
@@ -210,7 +210,7 @@ async def ordinances(
     q: str = Query(..., min_length=1, description="검색 키워드 또는 문장"),
     display: int = Query(30, ge=5, le=80),
 ) -> dict:
-    """키워드가 포함된 자치법규 목록을 반환한다."""
+    """키워드가 조문 본문에 실제 포함된 자치법규 목록을 반환한다."""
     query = q.strip()
     if not query:
         raise HTTPException(status_code=400, detail="검색어를 입력해 주세요.")

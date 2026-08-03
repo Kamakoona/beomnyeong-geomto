@@ -229,6 +229,7 @@ function renderList(items, query) {
           <span class="law-card-meta">
             ${item.orgName ? `<span>${escapeHtml(item.orgName)}</span>` : ""}
             ${item.effectiveDate ? `<span>시행 ${escapeHtml(item.effectiveDate)}</span>` : ""}
+            ${item.hitCount ? `<span>관련조문 ${escapeHtml(item.hitCount)}</span>` : ""}
           </span>
           <span class="law-card-action">조문 보기 →</span>
         </button>`
@@ -297,7 +298,7 @@ async function loadOrdinanceList(query) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "자치법규 검색에 실패했습니다.");
     setStatus("");
-    const items = data.ordinances || [];
+    const items = (data.ordinances || []).filter((item) => Number(item?.hitCount || 0) > 0);
     renderList(items, data.query || q);
 
     if (currentMst) {
@@ -366,7 +367,8 @@ window.__ordinBoot = (data) => {
     const q = data.query || initialQuery || "";
     if (input && q) input.value = q;
     setStatus("");
-    renderList(data.ordinances || [], q);
+    const items = (data.ordinances || []).filter((item) => Number(item?.hitCount || 0) > 0);
+    renderList(items, q);
   } catch (err) {
     console.error(err);
   }
