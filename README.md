@@ -42,7 +42,10 @@ LAW_API_OC=test
 3. 이 GitHub 저장소 선택 (`render.yaml` 자동 인식)
 4. 환경변수 입력:
    - `LAW_API_OC`
-5. **Apply** 후 배포 완료되면 `https://xxxx.onrender.com` 주소로 접속
+5. **Apply** 후 배포 완료되면 아래 주소로 접속
+
+**공개 URL (메인):** https://law-search-2b2l.onrender.com
+
 
 수동 배포를 원하면 **Web Service**로 만들고 다음을 입력하세요.
 

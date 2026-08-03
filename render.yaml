@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: beomnyeong-geomto
+    name: law-search-2b2l
     runtime: python
     plan: free
     region: singapore
