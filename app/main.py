@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -25,12 +27,25 @@ STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
+HEAD_INJECT = (
+    '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'
+    '    <meta http-equiv="Pragma" content="no-cache" />\n'
+    "    "
+)
 
 
-def _asset_version(rel_url: str) -> str:
+@lru_cache(maxsize=64)
+def _asset_version(rel_url: str, mtime_ns: int, size: int) -> str:
+    path = STATIC_DIR / rel_url.removeprefix("/static/")
+    digest = hashlib.sha1(path.read_bytes()).hexdigest()[:10]
+    return f"{digest}-{mtime_ns}-{size}"
+
+
+def asset_version(rel_url: str) -> str:
     path = STATIC_DIR / rel_url.removeprefix("/static/")
     try:
-        return str(int(path.stat().st_mtime))
+        st = path.stat()
+        return _asset_version(rel_url, st.st_mtime_ns, st.st_size)
     except OSError:
         return "0"
 
@@ -38,15 +53,20 @@ def _asset_version(rel_url: str) -> str:
 def html_page(filename: str) -> HTMLResponse:
     """HTML을 내려줄 때 정적 자산 URL에 버전을 붙여 캐시를 무효화한다."""
     text = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    if "<head>" in text and "http-equiv=\"Cache-Control\"" not in text:
+        text = text.replace("<head>", f"<head>\n    {HEAD_INJECT}", 1)
     text = ASSET_REF_RE.sub(
-        lambda m: f'{m.group(1)}{m.group(2)}?v={_asset_version(m.group(2))}{m.group(3)}',
+        lambda m: f'{m.group(1)}{m.group(2)}?v={asset_version(m.group(2))}{m.group(3)}',
         text,
     )
     return HTMLResponse(
         content=text,
         headers={
-            "Cache-Control": "no-store, max-age=0, must-revalidate",
+            "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
             "Pragma": "no-cache",
+            "Expires": "0",
+            # Chrome이 이 사이트의 HTTP 캐시를 비우도록 유도 (HTTPS에서만 동작)
+            "Clear-Site-Data": '"cache"',
         },
     )
 
@@ -58,11 +78,13 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
         if path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
         elif path in {"/", "/law", "/ordin"}:
-            response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+            response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Clear-Site-Data"] = '"cache"'
         return response
 
 
-app = FastAPI(title="법제처 법령 조문 검색", version="1.3.0")
+app = FastAPI(title="법제처 법령 조문 검색", version="1.3.1")
 app.add_middleware(StaticCacheMiddleware)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
