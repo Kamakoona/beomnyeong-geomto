@@ -10,6 +10,11 @@ const initialQuery = (params.get("q") || "").trim();
 const initialMst = (params.get("mst") || "").trim();
 const initialName = (params.get("name") || params.get("ordinName") || "").trim();
 
+let currentQuery = initialQuery;
+let currentMst = initialMst;
+let currentName = initialName;
+let latestList = [];
+
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
 const button = document.getElementById("search-btn");

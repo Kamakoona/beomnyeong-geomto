@@ -1,4 +1,4 @@
-"""Shared browser helpers for search / law / ordinance pages."""
+/* Shared browser helpers for search / law / ordinance pages. */
 
 export function escapeHtml(value) {
   return String(value ?? "")
