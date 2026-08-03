@@ -7,6 +7,7 @@ const form = document.getElementById("search-form");
 const input = document.getElementById("query");
 const button = document.getElementById("search-btn");
 const openAllBtn = document.getElementById("open-all-btn");
+const searchBar = document.getElementById("search-bar");
 const statusEl = document.getElementById("status");
 const metaEl = document.getElementById("meta");
 const compareEl = document.getElementById("compare");
@@ -16,10 +17,10 @@ const scopePill = document.getElementById("scope-pill");
 const scopeLead = document.getElementById("scope-lead");
 const workspaceEl = document.getElementById("workspace");
 
-let currentQuery = initialQuery;
-let currentMst = initialMst;
-let currentName = initialName;
-let latestList = [];
+function setOpenAllVisible(visible) {
+  openAllBtn.hidden = !visible;
+  searchBar?.classList.toggle("with-secondary", Boolean(visible));
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -128,6 +129,7 @@ function renderArticles(data) {
   currentName = name;
   currentQuery = isFull ? currentQuery : query;
   openAllBtn.hidden = !currentMst;
+  setOpenAllVisible(Boolean(currentMst));
 
   pageTitle.textContent = isFull ? `${name} · 전체 조문` : name;
   document.title = isFull ? `${name} · 전체 조문` : `${name} · 자치법규 검색`;
@@ -228,7 +230,7 @@ function renderList(items, query) {
   `;
   scopePill.hidden = true;
   scopePill.innerHTML = "";
-  openAllBtn.hidden = true;
+  setOpenAllVisible(false);
   workspaceEl.hidden = true;
   listEl.hidden = false;
 
