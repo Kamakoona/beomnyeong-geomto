@@ -631,10 +631,40 @@ mark.hit.inline-hit {
   background: #5b6e8c;
 }
 
-.empty-with-ordinance {
+.list-meta {
+  margin: 0.75rem 0 1rem;
+}
+
+.instrument-block {
   display: grid;
-  gap: 0.55rem;
-  text-align: left;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 252, 246, 0.92);
+}
+
+.instrument-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+.meta .ghost-btn {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.meta .ghost-btn:hover {
+  color: var(--ink);
+  background: #fff;
 }
 
 .empty-with-ordinance p {

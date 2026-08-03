@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>자치법규 검색</title>
+    <title>자치법규 조문 검색</title>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,24 +25,46 @@
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="brand-kicker">자치법규 검색 결과</p>
-          <h1 class="brand-title" id="page-title">자치법규</h1>
+          <p class="brand-kicker">자치법규 범위 검색</p>
+          <h1 class="brand-title" id="page-title">자치법규 조문 검색</h1>
         </div>
       </div>
-      <a class="source-link" href="/" target="_blank" rel="noopener noreferrer">법률 목록으로</a>
+      <a class="source-link" href="/home" rel="noopener noreferrer">법률 목록으로</a>
     </header>
 
-    <main class="shell">
-      <section class="hero">
+    <main class="shell shell-wide">
+      <section class="hero law-scope-hero">
         <p class="hero-lead" id="scope-lead">
-          선택한 키워드가 포함된 <em>자치법규(조례 등)</em> 목록입니다.
-          항목을 누르면 국가법령정보센터 원문이 새 탭에서 열립니다.
+          이 창에서는 선택한 <em>자치법규(조례 등)</em> 안에서
+          키워드가 포함된 조문을 법률 3단 검색과 같은 형태로 보여 줍니다.
         </p>
+
+        <div class="scope-pill" id="scope-pill" hidden></div>
+
+        <form id="search-form" class="search-form" autocomplete="off">
+          <label class="sr-only" for="query">검색어</label>
+          <div class="search-bar" id="search-bar">
+            <input
+              id="query"
+              name="query"
+              type="search"
+              placeholder="이 자치법규에서 찾을 키워드"
+              maxlength="200"
+              required
+            />
+            <button type="submit" id="search-btn">조문 검색</button>
+            <button type="button" id="open-all-btn" class="ghost-btn" hidden>전체 조문</button>
+          </div>
+        </form>
       </section>
 
       <section id="status" class="status" hidden></section>
       <section id="meta" class="meta" hidden></section>
       <section id="ordin-list" class="law-list" aria-live="polite"></section>
+
+      <section id="workspace" class="workspace" hidden>
+        <section id="compare" class="compare" aria-live="polite"></section>
+      </section>
     </main>
 
     <footer class="site-footer">

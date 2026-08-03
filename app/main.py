@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.law_client import (
     HTTP_HEADERS,
+    compare_ordinance,
     compare_three_tier_full,
     compare_three_tier,
     fetch_latest_article,
@@ -27,7 +28,7 @@ STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
 # 크롬 등 강한 캐시를 피하기 위해 배포마다 경로를 바꿈
-APP_BUILD = "20260803d"
+APP_BUILD = "20260803e"
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
 HEAD_INJECT = (
     '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'
@@ -88,7 +89,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="법제처 법령 조문 검색", version="1.3.3")
+app = FastAPI(title="법제처 법령 조문 검색", version="1.3.4")
 app.add_middleware(StaticCacheMiddleware)
 
 
@@ -222,6 +223,34 @@ async def ordinances(
         "ordinances": items,
         "source": "https://www.law.go.kr (자치법규 Open API)",
     }
+
+
+@app.get("/api/ordin-compare")
+async def ordin_compare(
+    q: str = Query("", description="검색 키워드(전체 조문이면 비워도 됨)"),
+    mst: str = Query(..., min_length=1, description="자치법규 일련번호"),
+    ordin_name: str = Query("", alias="ordinName"),
+    max_articles: int = Query(80, ge=5, le=300, alias="maxArticles"),
+    mode: str = Query("search", description="search | full"),
+) -> dict:
+    """선택한 자치법규의 키워드 일치 조문(또는 전체 조문)을 반환한다."""
+    query = q.strip()
+    full = (mode or "").strip().lower() == "full"
+    if not full and not query:
+        raise HTTPException(status_code=400, detail="검색어를 입력해 주세요.")
+
+    try:
+        result = await compare_ordinance(
+            query,
+            mst=mst,
+            ordin_name=ordin_name,
+            max_articles=max_articles,
+            full=full,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"자치법규 조문 조회 실패: {exc}") from exc
+
+    return result
 
 
 @app.get("/api/compare")

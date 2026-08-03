@@ -1496,3 +1496,125 @@ async def compare_three_tier_full(
         "total": total,
         "relatedLaws": related,
     }
+
+
+def _ordinance_jo_number(value: Any) -> str:
+    if isinstance(value, list):
+        value = value[0] if value else "0"
+    digits = re.sub(r"\D", "", str(value or "0"))
+    return digits or "0"
+
+
+async def compare_ordinance(
+    query: str,
+    *,
+    mst: str,
+    ordin_name: str = "",
+    max_articles: int = 80,
+    full: bool = False,
+) -> dict[str, Any]:
+    """선택한 자치법규에서 키워드 일치 조문(또는 전체 조문)을 반환한다."""
+    mst = str(mst or "").strip()
+    if not mst:
+        return {
+            "query": query,
+            "mode": "full" if full else "search",
+            "total": 0,
+            "instrument": None,
+            "articles": [],
+        }
+
+    tokens = [] if full else query_tokens(query)
+    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
+        data = await fetch_json(
+            client,
+            "lawService.do",
+            {
+                "target": "ordin",
+                "MST": mst,
+            },
+        )
+
+    root = data.get("LawService")
+    if not isinstance(root, dict):
+        return {
+            "query": query,
+            "mode": "full" if full else "search",
+            "total": 0,
+            "instrument": None,
+            "articles": [],
+            "error": "일치하는 자치법규가 없습니다.",
+        }
+
+    basic = root.get("자치법규기본정보") or {}
+    name = basic.get("자치법규명") or ordin_name or ""
+    org = basic.get("지자체기관명") or ""
+    kind = basic.get("자치법규종류") or ""
+    effective = format_date(basic.get("시행일자"))
+    promulgated = format_date(basic.get("공포일자"))
+    portal = f"https://www.law.go.kr/자치법규/{name}" if name else (
+        f"https://www.law.go.kr/LSW/ordinInfoP.do?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
+    )
+
+    instrument = {
+        "mst": str(basic.get("자치법규일련번호") or mst),
+        "ordinId": str(basic.get("자치법규ID") or ""),
+        "ordinName": name,
+        "orgName": org,
+        "ordinKind": kind,
+        "category": "자치법규",
+        "effectiveDate": effective,
+        "promulgationDate": promulgated,
+        "detailUrl": portal,
+        "sourceUrl": portal,
+    }
+
+    units = as_list((root.get("조문") or {}).get("조"))
+    articles: list[dict[str, Any]] = []
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        if str(unit.get("조문여부") or "").upper() != "Y":
+            continue
+
+        jo_raw = _ordinance_jo_number(unit.get("조문번호"))
+        title = unit.get("조제목") or ""
+        content = str(unit.get("조내용") or "").strip()
+        if not content and not title:
+            continue
+
+        haystack = f"{title}\n{content}"
+        if tokens and not text_matches(haystack, tokens, full_query=query):
+            continue
+
+        article_no = str(int(jo_raw)) if jo_raw.isdigit() else jo_raw
+        label = format_article_label(article_no)
+        articles.append(
+            {
+                "mst": instrument["mst"],
+                "ordinId": instrument["ordinId"],
+                "ordinName": name,
+                "category": "자치법규",
+                "orgName": org,
+                "articleNo": article_no,
+                "articleBranch": "0",
+                "articleLabel": label,
+                "articleTitle": title,
+                "articleContent": content,
+                "contentBlocks": [{"type": "text", "text": content}] if content else [],
+                "effectiveDate": effective,
+                "detailUrl": portal,
+                "joParam": jo_param(article_no, "0"),
+            }
+        )
+        if len(articles) >= max_articles:
+            break
+
+    articles.sort(key=lambda a: article_sort_key(a.get("articleNo"), a.get("articleBranch")))
+    return {
+        "query": "전체 조문" if full else query,
+        "mode": "full" if full else "search",
+        "total": len(articles),
+        "instrument": instrument,
+        "articles": articles,
+    }
