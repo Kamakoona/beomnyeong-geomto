@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.law_client import (
     HTTP_HEADERS,
@@ -22,25 +24,64 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
-app = FastAPI(title="법제처 법령 조문 검색", version="1.2.0")
+ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
+
+
+def _asset_version(rel_url: str) -> str:
+    path = STATIC_DIR / rel_url.removeprefix("/static/")
+    try:
+        return str(int(path.stat().st_mtime))
+    except OSError:
+        return "0"
+
+
+def html_page(filename: str) -> HTMLResponse:
+    """HTML을 내려줄 때 정적 자산 URL에 버전을 붙여 캐시를 무효화한다."""
+    text = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    text = ASSET_REF_RE.sub(
+        lambda m: f'{m.group(1)}{m.group(2)}?v={_asset_version(m.group(2))}{m.group(3)}',
+        text,
+    )
+    return HTMLResponse(
+        content=text,
+        headers={
+            "Cache-Control": "no-store, max-age=0, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+class StaticCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        elif path in {"/", "/law", "/ordin"}:
+            response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+        return response
+
+
+app = FastAPI(title="법제처 법령 조문 검색", version="1.3.0")
+app.add_middleware(StaticCacheMiddleware)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+async def index() -> HTMLResponse:
+    return html_page("index.html")
 
 
 @app.get("/law")
-async def law_page() -> FileResponse:
+async def law_page() -> HTMLResponse:
     """선택한 법률 범위에서 다시 검색하는 새 탭 페이지."""
-    return FileResponse(STATIC_DIR / "law.html")
+    return html_page("law.html")
 
 
 @app.get("/ordin")
-async def ordin_page() -> FileResponse:
+async def ordin_page() -> HTMLResponse:
     """자치법규 검색 결과 새 탭 페이지."""
-    return FileResponse(STATIC_DIR / "ordin.html")
+    return html_page("ordin.html")
 
 
 @app.get("/api/health")
@@ -48,6 +89,7 @@ async def health() -> dict:
     return {
         "ok": True,
         "oc": os.getenv("LAW_API_OC", "test"),
+        "version": app.version,
     }
 
 
