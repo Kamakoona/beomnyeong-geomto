@@ -268,12 +268,21 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
             seen.add(key)
             name = item.get("자치법규명") or ""
             org = item.get("지자체기관명") or ""
-            detail = (
-                f"{LAW_BASE}/lawService.do"
-                f"?OC={get_oc()}&target=ordin&MST={mst}&type=HTML"
+            # 법률의 /법령/{이름} 과 같은 포털 본문 화면 (DRF HTML 뷰어가 아님)
+            portal = (
+                f"https://www.law.go.kr/자치법규/{name}"
+                if name
+                else (
+                    f"https://www.law.go.kr/LSW/ordinInfoP.do"
+                    f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
+                )
             )
-            link = str(item.get("자치법규상세링크") or "")
-            source_url = f"https://www.law.go.kr{link}" if link.startswith("/") else (link or detail)
+            detail = (
+                f"https://www.law.go.kr/LSW/ordinInfoP.do"
+                f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
+                if mst
+                else portal
+            )
             results.append(
                 {
                     "ordinId": ordin_id,
@@ -285,7 +294,7 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
                     "effectiveDate": format_date(item.get("시행일자")),
                     "promulgationDate": format_date(item.get("공포일자")),
                     "detailUrl": detail,
-                    "sourceUrl": source_url,
+                    "sourceUrl": portal,
                 }
             )
         return results
