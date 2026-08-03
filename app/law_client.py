@@ -1498,11 +1498,16 @@ async def compare_three_tier_full(
     }
 
 
-def _ordinance_jo_number(value: Any) -> str:
+def _ordinance_jo_parts(value: Any) -> tuple[str, str]:
     if isinstance(value, list):
         value = value[0] if value else "0"
-    digits = re.sub(r"\D", "", str(value or "0"))
-    return digits or "0"
+    digits = re.sub(r"\D", "", str(value or "0")) or "0"
+    # 자치법규 조문번호는 보통 6자리(조문4 + 가지2)
+    if len(digits) >= 6:
+        return str(int(digits[:4])), str(int(digits[4:6]))
+    if len(digits) >= 3:
+        return str(int(digits[:-2] or 0)), str(int(digits[-2:] or 0))
+    return str(int(digits)), "0"
 
 
 async def compare_ordinance(
@@ -1577,7 +1582,7 @@ async def compare_ordinance(
         if str(unit.get("조문여부") or "").upper() != "Y":
             continue
 
-        jo_raw = _ordinance_jo_number(unit.get("조문번호"))
+        jo_no, jo_branch = _ordinance_jo_parts(unit.get("조문번호"))
         title = unit.get("조제목") or ""
         content = str(unit.get("조내용") or "").strip()
         if not content and not title:
@@ -1587,8 +1592,7 @@ async def compare_ordinance(
         if tokens and not text_matches(haystack, tokens, full_query=query):
             continue
 
-        article_no = str(int(jo_raw)) if jo_raw.isdigit() else jo_raw
-        label = format_article_label(article_no)
+        label = format_article_label(jo_no, jo_branch)
         articles.append(
             {
                 "mst": instrument["mst"],
@@ -1596,15 +1600,15 @@ async def compare_ordinance(
                 "ordinName": name,
                 "category": "자치법규",
                 "orgName": org,
-                "articleNo": article_no,
-                "articleBranch": "0",
+                "articleNo": jo_no,
+                "articleBranch": jo_branch,
                 "articleLabel": label,
                 "articleTitle": title,
                 "articleContent": content,
                 "contentBlocks": [{"type": "text", "text": content}] if content else [],
                 "effectiveDate": effective,
                 "detailUrl": portal,
-                "joParam": jo_param(article_no, "0"),
+                "joParam": jo_param(jo_no, jo_branch),
             }
         )
         if len(articles) >= max_articles:
