@@ -75,6 +75,56 @@
       </p>
     </footer>
 
-    <script src="/static/ordin.js" type="module"></script>
+    <script src="/static/ordin.js" defer></script>
+    <script>
+      // 메인 스크립트 로드 실패 시에도 목록이 비지 않도록 보조 부트
+      window.addEventListener("DOMContentLoaded", () => {
+        setTimeout(() => {
+          const list = document.getElementById("ordin-list");
+          if (!list || list.dataset.ready === "1" || list.innerHTML.trim()) return;
+          const q = new URLSearchParams(location.search).get("q") || "";
+          if (!q) return;
+          const status = document.getElementById("status");
+          if (status) {
+            status.hidden = false;
+            status.textContent = "자치법규를 검색하는 중입니다…";
+          }
+          fetch(`/api/ordinances?q=${encodeURIComponent(q)}&display=50`)
+            .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+            .then(({ ok, d }) => {
+              if (!ok) throw new Error(d.detail || "검색 실패");
+              if (typeof window.__ordinBoot === "function") {
+                window.__ordinBoot(d);
+                return;
+              }
+              const items = d.ordinances || [];
+              if (status) {
+                status.hidden = true;
+                status.textContent = "";
+              }
+              list.innerHTML = items.length
+                ? `<div class="law-list-head"><h2>자치법규 선택</h2></div><div class="law-grid">${items
+                    .map(
+                      (item) =>
+                        `<a class="law-card" href="/ordin?q=${encodeURIComponent(q)}&mst=${encodeURIComponent(
+                          item.mst || ""
+                        )}&name=${encodeURIComponent(item.ordinName || "")}"><span class="badge 자치법규">자치법규</span><strong class="law-card-title">${
+                          item.ordinName || ""
+                        }</strong></a>`
+                    )
+                    .join("")}</div>`
+                : `<div class="empty">일치하는 자치법규가 없습니다.</div>`;
+              list.dataset.ready = "1";
+            })
+            .catch((err) => {
+              if (status) {
+                status.hidden = false;
+                status.textContent = err.message || "검색 중 오류";
+                status.classList.add("error");
+              }
+            });
+        }, 800);
+      });
+    </script>
   </body>
 </html>

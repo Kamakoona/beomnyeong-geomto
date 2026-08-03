@@ -28,7 +28,7 @@ STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
 # 크롬 등 강한 캐시를 피하기 위해 배포마다 경로를 바꿈
-APP_BUILD = "20260803f"
+APP_BUILD = "20260803i"
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
 HEAD_INJECT = (
     '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'
@@ -39,7 +39,6 @@ NO_STORE_HEADERS = {
     "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
-    "Clear-Site-Data": '"cache", "storage"',
 }
 
 
@@ -89,7 +88,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="법제처 법령 조문 검색", version="1.3.5")
+app = FastAPI(title="법제처 법령 조문 검색", version="1.3.8")
 app.add_middleware(StaticCacheMiddleware)
 
 

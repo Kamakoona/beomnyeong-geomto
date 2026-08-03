@@ -18,6 +18,7 @@ const scopeLead = document.getElementById("scope-lead");
 const workspaceEl = document.getElementById("workspace");
 
 function setOpenAllVisible(visible) {
+  if (!openAllBtn) return;
   openAllBtn.hidden = !visible;
   searchBar?.classList.toggle("with-secondary", Boolean(visible));
 }
@@ -128,7 +129,6 @@ function renderArticles(data) {
   currentMst = instrument.mst || currentMst;
   currentName = name;
   currentQuery = isFull ? currentQuery : query;
-  openAllBtn.hidden = !currentMst;
   setOpenAllVisible(Boolean(currentMst));
 
   pageTitle.textContent = isFull ? `${name} · 전체 조문` : name;
@@ -220,14 +220,21 @@ function renderArticles(data) {
   `;
 }
 
+function markListReady() {
+  if (listEl) listEl.dataset.ready = "1";
+}
+
 function renderList(items, query) {
   latestList = items;
+  markListReady();
   pageTitle.textContent = `「${query}」 자치법규`;
   document.title = `${query} · 자치법규`;
-  scopeLead.innerHTML = `
+  if (scopeLead) {
+    scopeLead.innerHTML = `
     검색어 <em>${escapeHtml(query)}</em>가 포함된 자치법규 ${items.length}건입니다.
     항목을 선택하면 법률 3단 검색과 같은 형태로 관련 조문을 보여 줍니다.
   `;
+  }
   scopePill.hidden = true;
   scopePill.innerHTML = "";
   setOpenAllVisible(false);
@@ -350,7 +357,7 @@ async function loadOrdinanceList(query) {
   }
 }
 
-form.addEventListener("submit", (event) => {
+form?.addEventListener("submit", (event) => {
   event.preventDefault();
   const q = input.value.trim();
   if (!q) return;
@@ -361,12 +368,12 @@ form.addEventListener("submit", (event) => {
   }
 });
 
-openAllBtn.addEventListener("click", () => {
+openAllBtn?.addEventListener("click", () => {
   if (!currentMst) return;
   loadOrdinanceArticles({ query: currentQuery, mst: currentMst, name: currentName, full: true });
 });
 
-listEl.addEventListener("click", (event) => {
+listEl?.addEventListener("click", (event) => {
   const card = event.target.closest("[data-open-ordin]");
   if (!card) return;
   loadOrdinanceArticles({
@@ -376,7 +383,7 @@ listEl.addEventListener("click", (event) => {
   });
 });
 
-metaEl.addEventListener("click", (event) => {
+metaEl?.addEventListener("click", (event) => {
   const back = event.target.closest("[data-back-list]");
   if (!back) return;
   currentMst = "";
@@ -385,9 +392,26 @@ metaEl.addEventListener("click", (event) => {
   renderList(latestList, currentQuery);
 });
 
-if (initialQuery) {
-  input.value = initialQuery;
-  loadOrdinanceList(initialQuery);
-} else {
-  setStatus("검색어(q)가 없습니다. 메인에서 다시 검색해 주세요.", true);
+try {
+  if (initialQuery) {
+    if (input) input.value = initialQuery;
+    setStatus("자치법규를 검색하는 중입니다…");
+    loadOrdinanceList(initialQuery);
+  } else {
+    setStatus("검색어(q)가 없습니다. 메인에서 다시 검색해 주세요.", true);
+  }
+} catch (err) {
+  setStatus(err?.message || "화면을 초기화하지 못했습니다.", true);
+  console.error(err);
 }
+
+window.__ordinBoot = (data) => {
+  try {
+    const q = data.query || initialQuery || "";
+    if (input && q) input.value = q;
+    setStatus("");
+    renderList(data.ordinances || [], q);
+  } catch (err) {
+    console.error(err);
+  }
+};
