@@ -47,16 +47,23 @@ function setStatus(message, isError = false) {
   statusEl.classList.toggle("error", isError);
 }
 
+function openInNewTab(url) {
+  const href = String(url || "").trim();
+  if (!href) return false;
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  return true;
+}
+
 function openOrdinanceTab(query) {
   const q = String(query || "").trim();
   if (!q) return;
-  const url = `/ordin?q=${encodeURIComponent(q)}`;
-  const win = window.open(url, "_blank");
-  if (win) {
-    win.opener = null;
-    return;
-  }
-  setStatus("팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.", true);
+  openInNewTab(`/ordin?q=${encodeURIComponent(q)}`);
 }
 
 function hideOrdinancePrompt() {

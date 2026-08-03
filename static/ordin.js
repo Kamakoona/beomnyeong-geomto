@@ -54,13 +54,14 @@ function renderList(items, query) {
     </div>
     <div class="law-grid">
       ${items
-        .map(
-          (item) => `
-        <button
-          type="button"
+        .map((item) => {
+          const href = item.sourceUrl || item.detailUrl || "";
+          return `
+        <a
           class="law-card"
-          data-open-ordin
-          data-url="${escapeHtml(item.sourceUrl || item.detailUrl || "")}"
+          href="${escapeHtml(href)}"
+          target="_blank"
+          rel="noopener noreferrer"
         >
           <span class="badge 자치법규">자치법규</span>
           <strong class="law-card-title">${escapeHtml(item.ordinName || "")}</strong>
@@ -69,8 +70,8 @@ function renderList(items, query) {
             ${item.effectiveDate ? `<span>시행 ${escapeHtml(item.effectiveDate)}</span>` : ""}
           </span>
           <span class="law-card-action">원문 새 탭 →</span>
-        </button>`
-        )
+        </a>`;
+        })
         .join("")}
     </div>
   `;
@@ -94,15 +95,6 @@ async function loadOrdinances(query) {
     setStatus(err.message || "자치법규 검색 중 오류가 발생했습니다.", true);
   }
 }
-
-listEl.addEventListener("click", (event) => {
-  const card = event.target.closest("[data-open-ordin]");
-  if (!card) return;
-  const url = card.dataset.url;
-  if (!url) return;
-  const win = window.open(url, "_blank");
-  if (win) win.opener = null;
-});
 
 if (initialQuery) {
   loadOrdinances(initialQuery);

@@ -252,9 +252,13 @@ function renderContentBlocks(blocks, query, fallbackText) {
 function openOrdinanceTab(query) {
   const q = String(query || "").trim();
   if (!q) return;
-  const url = `/ordin?q=${encodeURIComponent(q)}`;
-  const win = window.open(url, "_blank");
-  if (win) win.opener = null;
+  const a = document.createElement("a");
+  a.href = `/ordin?q=${encodeURIComponent(q)}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function hideOrdinancePrompt() {
