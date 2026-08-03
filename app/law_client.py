@@ -1057,6 +1057,10 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     for law in laws:
         law["hitCount"] = hit_counts.get(law["lawId"], 0)
 
+    # 키워드와 일치하는 조문이 확인된 법령만 표시
+    # (이름만 비슷한 법령·본문검색 추정 결과는 제외)
+    laws = [law for law in laws if law.get("hitCount", 0) > 0]
+
     # 법률을 먼저, 그다음 관련도·이름 순
     laws.sort(key=lambda law: (*score_law(law, query, primary), -law.get("hitCount", 0)))
 
@@ -1326,7 +1330,7 @@ async def compare_three_tier(
                     tokens=tokens,
                     full_query=query,
                     max_articles=max_articles,
-                    fallback_primary=True,
+                    fallback_primary=False,
                 )
                 for label, law in targets
             ]
@@ -1334,14 +1338,18 @@ async def compare_three_tier(
 
     columns: dict[str, list[dict[str, Any]]] = {"법률": [], "시행령": [], "시행규칙": []}
     instruments: dict[str, dict[str, Any] | None] = {
-        "법률": companions["법률"],
-        "시행령": companions["시행령"],
-        "시행규칙": companions["시행규칙"],
+        "법률": None,
+        "시행령": None,
+        "시행규칙": None,
     }
     for label, articles, law in columns_raw:
-        columns[label] = articles
-        if law:
+        # 키워드 일치 조문이 없으면 해당 법률/시행령/시행규칙을 표시하지 않음
+        if law and articles:
+            columns[label] = articles
             instruments[label] = law
+        else:
+            columns[label] = []
+            instruments[label] = None
 
     total = sum(len(v) for v in columns.values())
     return {

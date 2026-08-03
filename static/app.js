@@ -123,16 +123,23 @@ async function runSearch(query) {
   button.textContent = "검색 중…";
   setStatus("관련 법률을 찾는 중입니다…");
   metaEl.hidden = true;
+  metaEl.innerHTML = "";
   lawListEl.innerHTML = "";
+  lawListEl._laws = [];
+  lawListEl._query = q;
 
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=80`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "검색에 실패했습니다.");
     setStatus("");
-    renderLawList(data.laws || [], data.query);
+    // 새 키워드 결과로 목록을 완전히 교체 (이전 검색 잔여 표시 방지)
+    const laws = Array.isArray(data.laws) ? data.laws : [];
+    renderLawList(laws, data.query || q, { expanded: false });
   } catch (err) {
     setStatus(err.message || "검색 중 오류가 발생했습니다.", true);
+    lawListEl.innerHTML = "";
+    lawListEl._laws = [];
   } finally {
     button.disabled = false;
     button.textContent = "법률 찾기";

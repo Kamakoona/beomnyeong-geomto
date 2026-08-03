@@ -284,14 +284,26 @@ function renderCompare(data) {
   const query = isFull ? "" : data.query || currentQuery;
   currentQuery = query;
 
+  // 키워드 검색: 일치 조문이 있는 단만 표시 / 전체 조문: 존재하는 법령 단 표시
+  const visibleCats = COLUMN_ORDER.filter((cat) => {
+    const articles = data.columns?.[cat] || [];
+    const instrument = data.instruments?.[cat];
+    if (isFull) return Boolean(instrument);
+    return articles.length > 0 && Boolean(instrument);
+  });
+
   pageTitle.textContent = isFull ? `${baseName} · 전체 조문` : baseName;
   document.title = isFull ? `${baseName} · 전체 조문` : `${baseName} · 3단 검색`;
 
   workspaceEl.hidden = false;
-  scopePill.hidden = false;
-  scopePill.innerHTML = COLUMN_ORDER.map((cat) =>
-    instrumentBlock(cat, data.instruments?.[cat])
-  ).join("");
+  scopePill.hidden = visibleCats.length === 0;
+  scopePill.innerHTML = visibleCats
+    .map((cat) => instrumentBlock(cat, data.instruments?.[cat]))
+    .join("");
+  scopePill.style.gridTemplateColumns =
+    visibleCats.length > 1
+      ? `repeat(${visibleCats.length}, minmax(0, 1fr))`
+      : "1fr";
 
   metaEl.hidden = false;
   metaEl.innerHTML = `
@@ -300,19 +312,34 @@ function renderCompare(data) {
       <strong class="query-banner-text">${escapeHtml(isFull ? "전체 조문" : query)}</strong>
     </div>
     <span class="pill">${isFull ? "전체 조문" : "관련 조문"} ${data.total || 0}건</span>
-    ${COLUMN_ORDER.map((cat) => {
-      const n = data.columns?.[cat]?.length || 0;
-      return `<span class="pill">${escapeHtml(cat)} ${n}</span>`;
-    }).join("")}
+    ${visibleCats
+      .map((cat) => {
+        const n = data.columns?.[cat]?.length || 0;
+        return `<span class="pill">${escapeHtml(cat)} ${n}</span>`;
+      })
+      .join("")}
   `;
 
-  const scopeLabel = isFull ? "선택 법령 · 전체 조문 3단 비교" : "선택 법령 범위 · 3단 비교";
+  const scopeLabel = isFull ? "선택 법령 · 전체 조문 3단 비교" : "선택 법령 범위 · 키워드 일치 조문";
   const scopeTitle = isFull
     ? `「${escapeHtml(baseName)}」 전체 조문`
     : `「${escapeHtml(baseName)}」 관련 조문`;
   const scopeDescription = isFull
     ? "선택한 법률과 대응 시행령·시행규칙의 전체 조문을 키워드 필터 없이 표시합니다."
-    : `노란색 표시는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다.`;
+    : `노란색 표시는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 일치 조문이 없는 법령은 표시하지 않습니다.`;
+
+  if (!visibleCats.length) {
+    compareEl.innerHTML = `
+      <div class="compare-toolbar">
+        <div>
+          <p class="compare-kicker">${scopeLabel}</p>
+          <h2>${scopeTitle}</h2>
+        </div>
+      </div>
+      <div class="empty">키워드와 일치하는 조문이 없습니다.</div>
+    `;
+    return;
+  }
 
   compareEl.innerHTML = `
     <div class="compare-toolbar">
@@ -324,45 +351,35 @@ function renderCompare(data) {
         </p>
       </div>
     </div>
-    <div class="tri-board">
-      ${COLUMN_ORDER.map((cat) => {
-        const instrument = data.instruments?.[cat];
-        const articles = data.columns?.[cat] || [];
-        return `
+    <div class="tri-board" style="grid-template-columns: repeat(${visibleCats.length}, minmax(0, 1fr));">
+      ${visibleCats
+        .map((cat) => {
+          const instrument = data.instruments?.[cat];
+          const articles = data.columns?.[cat] || [];
+          return `
           <section class="tri-col" data-cat="${escapeHtml(cat)}">
             <header class="tri-col-head">
               <div>
                 <p class="tri-cat">${escapeHtml(cat)}</p>
-                <h3>${instrument ? escapeHtml(instrument.lawName) : "해당 없음"}</h3>
+                <h3>${escapeHtml(instrument.lawName)}</h3>
                 <p class="tri-date">
                   ${
                     instrument?.effectiveDate
                       ? `시행 ${escapeHtml(instrument.effectiveDate)}`
-                      : instrument
-                        ? "시행일 정보 없음"
-                        : ""
+                      : "시행일 정보 없음"
                   }
                 </p>
-                ${instrument ? currencyBadge(instrument.currency) : ""}
-                ${instrument ? `<div class="tri-currency">${currencyMeta(instrument.currency)}</div>` : ""}
+                ${currencyBadge(instrument.currency)}
+                <div class="tri-currency">${currencyMeta(instrument.currency)}</div>
               </div>
               <span class="count">${articles.length}개</span>
             </header>
             <div class="tri-col-body">
-              ${
-                articles.length
-                  ? articles.map((a) => articleCard(a, query)).join("")
-                  : `<div class="col-empty">${
-                      instrument
-                        ? isFull
-                          ? "조문이 없습니다."
-                          : "관련 조문이 없습니다."
-                        : `${cat}을(를) 찾지 못했습니다.`
-                    }</div>`
-              }
+              ${articles.map((a) => articleCard(a, query)).join("")}
             </div>
           </section>`;
-      }).join("")}
+        })
+        .join("")}
     </div>
   `;
 }
@@ -406,6 +423,8 @@ async function runScopedSearch(query) {
   setStatus(`「${lawName || "선택 법률"}」 범위에서 조문을 찾는 중입니다…`);
   workspaceEl.hidden = false;
   metaEl.hidden = true;
+  scopePill.hidden = true;
+  scopePill.innerHTML = "";
   compareEl.innerHTML = `<div class="empty">조문을 불러오는 중…</div>`;
 
   const next = new URL(location.href);
@@ -423,10 +442,14 @@ async function runScopedSearch(query) {
     const res = await fetch(`/api/compare?${searchParams}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "조문 검색에 실패했습니다.");
+    // 재검색 결과는 항상 키워드 검색 모드로 표시
+    data.mode = "search";
     setStatus("");
     renderCompare(data);
   } catch (err) {
     setStatus(err.message || "검색 중 오류가 발생했습니다.", true);
+    scopePill.hidden = true;
+    scopePill.innerHTML = "";
     compareEl.innerHTML = `<div class="empty error-box">조문을 불러오지 못했습니다.</div>`;
   } finally {
     button.disabled = false;
