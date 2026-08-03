@@ -6,6 +6,8 @@ const metaEl = document.getElementById("meta");
 const lawListEl = document.getElementById("law-list");
 const chips = document.getElementById("chips");
 
+let latestOrdinances = [];
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -27,6 +29,75 @@ function setStatus(message, isError = false) {
   statusEl.classList.toggle("error", isError);
 }
 
+function openOrdinanceTab(query) {
+  const q = String(query || "").trim();
+  if (!q) return;
+  const url = `/ordin?q=${encodeURIComponent(q)}`;
+  const win = window.open(url, "_blank");
+  if (win) {
+    win.opener = null;
+    return;
+  }
+  setStatus("팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.", true);
+}
+
+function hideOrdinancePrompt() {
+  const el = document.getElementById("ordinance-prompt");
+  if (el) el.remove();
+}
+
+function ordinanceSamples(ordinances) {
+  return ordinances
+    .slice(0, 3)
+    .map((item) => item.ordinName || "")
+    .filter(Boolean)
+    .join(", ");
+}
+
+function bindOrdinancePromptActions(root, query) {
+  root.querySelector("[data-ordin-open]")?.addEventListener("click", () => {
+    openOrdinanceTab(query);
+    hideOrdinancePrompt();
+  });
+  root.querySelector("[data-ordin-dismiss]")?.addEventListener("click", () => {
+    hideOrdinancePrompt();
+  });
+}
+
+function ordinancePromptHtml(query, ordinances) {
+  const count = ordinances.length;
+  const samples = ordinanceSamples(ordinances);
+  return `
+    <div class="ordinance-prompt-card">
+      <div>
+        <p class="ordinance-prompt-kicker">자치법규 검색 결과</p>
+        <h2>자치법규 ${count}건에서 「${escapeHtml(query)}」가 확인되었습니다.</h2>
+        <p class="ordinance-prompt-sub">
+          법률·시행령·시행규칙에는 없거나 부족해도, 조례 등 자치법규에는 있을 수 있습니다.
+          ${samples ? `예: ${escapeHtml(samples)}${count > 3 ? " 외" : ""}` : ""}
+        </p>
+        <p class="ordinance-prompt-ask">자치법규 결과를 새 탭에서 열어볼까요?</p>
+      </div>
+      <div class="ordinance-prompt-actions">
+        <button type="button" class="prompt-primary" data-ordin-open>새 탭에서 열기</button>
+        <button type="button" class="prompt-secondary" data-ordin-dismiss>닫기</button>
+      </div>
+    </div>
+  `;
+}
+
+function showOrdinancePrompt(query, ordinances) {
+  hideOrdinancePrompt();
+  if (!ordinances.length) return;
+
+  const prompt = document.createElement("section");
+  prompt.id = "ordinance-prompt";
+  prompt.className = "ordinance-prompt";
+  prompt.innerHTML = ordinancePromptHtml(query, ordinances);
+  lawListEl.insertAdjacentElement("beforebegin", prompt);
+  bindOrdinancePromptActions(prompt, query);
+}
+
 function openLawWindow(lawId, lawName, query) {
   const params = new URLSearchParams({
     lawId,
@@ -34,7 +105,6 @@ function openLawWindow(lawId, lawName, query) {
   });
   if (query) params.set("q", query);
   const url = `/law?${params.toString()}`;
-  // 세 번째 인자(features)를 주면 브라우저가 팝업 창으로 여는 경우가 많아, 새 탭용으로 생략한다.
   const win = window.open(url, "_blank");
   if (win) {
     win.opener = null;
@@ -73,24 +143,47 @@ function lawCardHtml(law) {
     </button>`;
 }
 
-function renderLawList(laws, query, { expanded = false } = {}) {
-  if (!laws.length) {
-    lawListEl.innerHTML = `<div class="empty">관련 법률을 찾지 못했습니다. 다른 키워드로 검색해 보세요.</div>`;
-    return;
-  }
-
+function renderSearchMeta(query, laws) {
   const statuteCount = laws.filter((l) => l.category === "법률").length;
-  const hasMore = laws.length > INITIAL_LAW_LIMIT;
-  const visible = expanded || !hasMore ? laws : laws.slice(0, INITIAL_LAW_LIMIT);
-  const remaining = laws.length - INITIAL_LAW_LIMIT;
-
+  const ordinCount = latestOrdinances.length;
   metaEl.hidden = false;
   metaEl.innerHTML = `
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
     <span class="pill">관련 법령 ${laws.length}건</span>
     ${statuteCount ? `<span class="pill">법률 ${statuteCount}건</span>` : ""}
-    <span class="hint">법률·시행령·시행규칙 중 하나를 선택하면 새 탭에서 3단으로 검색합니다</span>
+    ${ordinCount ? `<span class="pill">자치법규 ${ordinCount}건</span>` : ""}
+    <span class="hint">${
+      laws.length
+        ? "법률·시행령·시행규칙 중 하나를 선택하면 새 탭에서 3단으로 검색합니다"
+        : ordinCount
+          ? "관련 법률은 없지만 자치법규(조례 등)에서 검색되었습니다"
+          : "다른 키워드로 다시 검색해 보세요"
+    }</span>
   `;
+}
+
+function renderLawList(laws, query, { expanded = false } = {}) {
+  if (!laws.length) {
+    renderSearchMeta(query, laws);
+    if (latestOrdinances.length) {
+      lawListEl.innerHTML = `
+        <div class="empty empty-with-ordinance">
+          <p>관련 법률·시행령·시행규칙은 찾지 못했습니다.</p>
+          <p class="empty-ordinance-note">다만 자치법규 ${latestOrdinances.length}건에서 「${escapeHtml(
+            query
+          )}」가 확인되었습니다. 아래에서 새 탭으로 열어볼 수 있습니다.</p>
+        </div>`;
+      return;
+    }
+    lawListEl.innerHTML = `<div class="empty">관련 법률을 찾지 못했습니다. 다른 키워드로 검색해 보세요.</div>`;
+    return;
+  }
+
+  const hasMore = laws.length > INITIAL_LAW_LIMIT;
+  const visible = expanded || !hasMore ? laws : laws.slice(0, INITIAL_LAW_LIMIT);
+  const remaining = laws.length - INITIAL_LAW_LIMIT;
+
+  renderSearchMeta(query, laws);
 
   lawListEl.innerHTML = `
     <div class="law-list-head">
@@ -127,15 +220,20 @@ async function runSearch(query) {
   lawListEl.innerHTML = "";
   lawListEl._laws = [];
   lawListEl._query = q;
+  latestOrdinances = [];
+  hideOrdinancePrompt();
 
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=80`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "검색에 실패했습니다.");
     setStatus("");
-    // 새 키워드 결과로 목록을 완전히 교체 (이전 검색 잔여 표시 방지)
     const laws = Array.isArray(data.laws) ? data.laws : [];
+    latestOrdinances = Array.isArray(data.ordinances) ? data.ordinances : [];
     renderLawList(laws, data.query || q, { expanded: false });
+    if (latestOrdinances.length) {
+      showOrdinancePrompt(data.query || q, latestOrdinances);
+    }
   } catch (err) {
     setStatus(err.message || "검색 중 오류가 발생했습니다.", true);
     lawListEl.innerHTML = "";

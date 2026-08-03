@@ -235,6 +235,62 @@ async def search_laws(
     return results
 
 
+async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str, Any]]:
+    """키워드 본문검색으로 자치법규 목록을 반환한다."""
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
+        data = await fetch_json(
+            client,
+            "lawSearch.do",
+            {
+                "target": "ordin",
+                "query": q,
+                "search": 2,
+                "display": min(display, 50),
+                "page": 1,
+            },
+        )
+        root = data.get("OrdinSearch") or {}
+        items = as_list(root.get("law"))
+        results: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            mst = str(item.get("자치법규일련번호") or "").strip()
+            ordin_id = str(item.get("자치법규ID") or "").strip()
+            key = mst or ordin_id
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            name = item.get("자치법규명") or ""
+            org = item.get("지자체기관명") or ""
+            detail = (
+                f"{LAW_BASE}/lawService.do"
+                f"?OC={get_oc()}&target=ordin&MST={mst}&type=HTML"
+            )
+            link = str(item.get("자치법규상세링크") or "")
+            source_url = f"https://www.law.go.kr{link}" if link.startswith("/") else (link or detail)
+            results.append(
+                {
+                    "ordinId": ordin_id,
+                    "mst": mst,
+                    "ordinName": name,
+                    "orgName": org,
+                    "ordinKind": item.get("자치법규종류") or "",
+                    "category": "자치법규",
+                    "effectiveDate": format_date(item.get("시행일자")),
+                    "promulgationDate": format_date(item.get("공포일자")),
+                    "detailUrl": detail,
+                    "sourceUrl": source_url,
+                }
+            )
+        return results
+
+
 def parse_ymd(value: str | int | None) -> date | None:
     text = re.sub(r"\D", "", str(value or ""))
     if len(text) < 8:

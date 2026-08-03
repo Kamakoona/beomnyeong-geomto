@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>자치법규 검색</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-wash" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="brand-kicker">자치법규 검색 결과</p>
+          <h1 class="brand-title" id="page-title">자치법규</h1>
+        </div>
+      </div>
+      <a class="source-link" href="/" target="_blank" rel="noopener noreferrer">법률 목록으로</a>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <p class="hero-lead" id="scope-lead">
+          선택한 키워드가 포함된 <em>자치법규(조례 등)</em> 목록입니다.
+          항목을 누르면 국가법령정보센터 원문이 새 탭에서 열립니다.
+        </p>
+      </section>
+
+      <section id="status" class="status" hidden></section>
+      <section id="meta" class="meta" hidden></section>
+      <section id="ordin-list" class="law-list" aria-live="polite"></section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        데이터 출처:
+        <a href="https://www.law.go.kr" target="_blank" rel="noopener noreferrer">국가법령정보센터</a>
+        · 법제처(<a href="https://www.moleg.go.kr" target="_blank" rel="noopener noreferrer">www.moleg.go.kr</a>)
+      </p>
+    </footer>
+
+    <script src="/static/ordin.js" type="module"></script>
+  </body>
+</html>

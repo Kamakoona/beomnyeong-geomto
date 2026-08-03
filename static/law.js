@@ -249,6 +249,72 @@ function renderContentBlocks(blocks, query, fallbackText) {
     .join("")}</div>`;
 }
 
+function openOrdinanceTab(query) {
+  const q = String(query || "").trim();
+  if (!q) return;
+  const url = `/ordin?q=${encodeURIComponent(q)}`;
+  const win = window.open(url, "_blank");
+  if (win) win.opener = null;
+}
+
+function hideOrdinancePrompt() {
+  const el = document.getElementById("ordinance-prompt");
+  if (el) el.remove();
+}
+
+function showOrdinancePrompt(query, ordinances) {
+  hideOrdinancePrompt();
+  const count = ordinances.length;
+  if (!count) return;
+  const samples = ordinances
+    .slice(0, 3)
+    .map((item) => item.ordinName || "")
+    .filter(Boolean)
+    .join(", ");
+
+  const prompt = document.createElement("section");
+  prompt.id = "ordinance-prompt";
+  prompt.className = "ordinance-prompt";
+  prompt.innerHTML = `
+    <div class="ordinance-prompt-card">
+      <div>
+        <p class="ordinance-prompt-kicker">자치법규 검색 결과</p>
+        <h2>이 법령에는 없더라도, 자치법규 ${count}건에서 「${escapeHtml(query)}」가 확인되었습니다.</h2>
+        <p class="ordinance-prompt-sub">
+          ${samples ? `예: ${escapeHtml(samples)}${count > 3 ? " 외" : ""}` : ""}
+        </p>
+        <p class="ordinance-prompt-ask">자치법규 결과를 새 탭에서 열어볼까요?</p>
+      </div>
+      <div class="ordinance-prompt-actions">
+        <button type="button" class="prompt-primary" data-ordin-open>새 탭에서 열기</button>
+        <button type="button" class="prompt-secondary" data-ordin-dismiss>닫기</button>
+      </div>
+    </div>
+  `;
+  statusEl.insertAdjacentElement("afterend", prompt);
+  prompt.querySelector("[data-ordin-open]")?.addEventListener("click", () => {
+    openOrdinanceTab(query);
+    hideOrdinancePrompt();
+  });
+  prompt.querySelector("[data-ordin-dismiss]")?.addEventListener("click", () => {
+    hideOrdinancePrompt();
+  });
+}
+
+async function maybeOfferOrdinances(query) {
+  const q = String(query || "").trim();
+  if (!q) return;
+  try {
+    const res = await fetch(`/api/ordinances?q=${encodeURIComponent(q)}&display=30`);
+    const data = await res.json();
+    if (!res.ok) return;
+    const items = Array.isArray(data.ordinances) ? data.ordinances : [];
+    if (items.length) showOrdinancePrompt(data.query || q, items);
+  } catch {
+    // 자치법규 안내 실패는 본 검색 흐름 막지 않음
+  }
+}
+
 function articleCard(article, query) {
   const titleRaw = article.articleTitle
     ? `${article.articleLabel}(${article.articleTitle})`
@@ -338,6 +404,9 @@ function renderCompare(data) {
       </div>
       <div class="empty">키워드와 일치하는 조문이 없습니다.</div>
     `;
+    if (!isFull && query) {
+      maybeOfferOrdinances(query);
+    }
     return;
   }
 
@@ -426,6 +495,7 @@ async function runScopedSearch(query) {
   scopePill.hidden = true;
   scopePill.innerHTML = "";
   compareEl.innerHTML = `<div class="empty">조문을 불러오는 중…</div>`;
+  hideOrdinancePrompt();
 
   const next = new URL(location.href);
   next.searchParams.set("q", q);

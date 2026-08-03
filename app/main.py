@@ -15,6 +15,7 @@ from app.law_client import (
     compare_three_tier,
     fetch_latest_article,
     search_law_list,
+    search_ordinance_list,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,6 +35,12 @@ async def index() -> FileResponse:
 async def law_page() -> FileResponse:
     """선택한 법률 범위에서 다시 검색하는 새 탭 페이지."""
     return FileResponse(STATIC_DIR / "law.html")
+
+
+@app.get("/ordin")
+async def ordin_page() -> FileResponse:
+    """자치법규 검색 결과 새 탭 페이지."""
+    return FileResponse(STATIC_DIR / "ordin.html")
 
 
 @app.get("/api/health")
@@ -84,12 +91,43 @@ async def search(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"법령 API 호출 실패: {exc}") from exc
 
+    ordinances: list = []
+    try:
+        ordinances = await search_ordinance_list(query, display=30)
+    except Exception:  # noqa: BLE001
+        ordinances = []
+
     return {
         "query": query,
         "total": len(laws),
         "laws": laws,
+        "ordinances": ordinances,
+        "ordinanceTotal": len(ordinances),
         "source": "https://www.law.go.kr (법제처 국가법령정보센터 Open API)",
         "moleg": "https://www.moleg.go.kr",
+    }
+
+
+@app.get("/api/ordinances")
+async def ordinances(
+    q: str = Query(..., min_length=1, description="검색 키워드 또는 문장"),
+    display: int = Query(30, ge=5, le=80),
+) -> dict:
+    """키워드가 포함된 자치법규 목록을 반환한다."""
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="검색어를 입력해 주세요.")
+
+    try:
+        items = await search_ordinance_list(query, display=display)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"자치법규 검색 실패: {exc}") from exc
+
+    return {
+        "query": query,
+        "total": len(items),
+        "ordinances": items,
+        "source": "https://www.law.go.kr (자치법규 Open API)",
     }
 
 

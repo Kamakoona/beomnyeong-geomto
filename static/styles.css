@@ -609,6 +609,124 @@ mark.hit.inline-hit {
   background: var(--rule);
 }
 
+.badge.자치법규 {
+  background: #5b6e8c;
+}
+
+.empty-with-ordinance {
+  display: grid;
+  gap: 0.55rem;
+  text-align: left;
+}
+
+.empty-with-ordinance p {
+  margin: 0;
+}
+
+.empty-ordinance-note {
+  color: var(--accent-deep);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ordinance-prompt {
+  margin: 1rem 0 0;
+  animation: rise 0.45s ease both;
+}
+
+.ordinance-prompt-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid rgba(15, 107, 92, 0.22);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(236, 245, 241, 0.9));
+  box-shadow: var(--shadow);
+}
+
+.ordinance-prompt-kicker {
+  margin: 0 0 0.25rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.ordinance-prompt-card h2 {
+  margin: 0;
+  font-family: "Noto Serif KR", serif;
+  font-size: 1.15rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.ordinance-prompt-sub,
+.ordinance-prompt-ask {
+  margin: 0.45rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.ordinance-prompt-ask {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ordinance-prompt-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-shrink: 0;
+}
+
+.prompt-primary,
+.prompt-secondary {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 0.7rem 1.1rem;
+  border: 1px solid transparent;
+}
+
+.prompt-primary {
+  background: var(--ink);
+  color: #f7f3eb;
+  font-weight: 600;
+}
+
+.prompt-primary:hover {
+  background: var(--accent-deep);
+}
+
+.prompt-secondary {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+
+.prompt-secondary:hover {
+  color: var(--ink);
+  background: #fff;
+}
+
+@media (max-width: 720px) {
+  .ordinance-prompt-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ordinance-prompt-actions {
+    width: 100%;
+  }
+
+  .prompt-primary,
+  .prompt-secondary {
+    flex: 1;
+  }
+}
+
 .compare {
   margin-top: 2rem;
   animation: rise 0.6s ease both;
