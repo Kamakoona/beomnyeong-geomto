@@ -1003,68 +1003,87 @@ def pick_companion_laws(
 
 
 async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]:
-    """키워드와 관련된 법령(우선 법률) 목록을 반환한다."""
+    """키워드와 관련된 법령(우선 법률) 목록을 반환한다.
+
+    AI/이름 검색 후보는 참고만 하고, 실제 조문 본문에 키워드가 포함된
+    법령만 최종 목록에 올린다. (상세 3단 검색과 동일 기준)
+    """
     tokens = query_tokens(query)
     primary = primary_keyword(query, tokens)
 
     async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
         tasks = [
             search_ai_articles(client, query, min(display, 40)),
-            search_laws(client, query, search=1, display=15),
-            search_laws(client, primary, search=1, display=20),
             search_laws(client, query, search=2, display=20),
             search_laws(client, primary, search=2, display=20),
         ]
-        for token in [t for t in tokens if t != primary][:2]:
-            tasks.append(search_laws(client, token, search=1, display=10))
-
         results = await asyncio.gather(*tasks)
         ai_articles = results[0]
-        name_hits = merge_laws(*results[1:3], *results[5:])
-        body_hits = merge_laws(results[3], results[4])
+        body_hits = merge_laws(results[1], results[2])
 
-    # AI 검색 결과에서 등장한 법령도 목록에 반영
-    from_ai: list[dict[str, Any]] = []
-    seen_ai: set[str] = set()
-    for article in ai_articles:
-        law_id = article.get("lawId")
-        if not law_id or law_id in seen_ai:
-            continue
-        seen_ai.add(law_id)
-        from_ai.append(
-            {
-                "lawId": law_id,
-                "mst": article.get("mst") or "",
-                "lawName": article.get("lawName") or "",
-                "lawKind": article.get("lawKind") or "",
-                "category": article.get("category") or "기타",
-                "ministry": article.get("ministry") or "",
-                "effectiveDate": article.get("effectiveDate") or "",
-                "promulgationDate": article.get("promulgationDate") or "",
-                "detailUrl": article.get("detailUrl") or "",
-                "hitCount": 1,
-            }
-        )
+        # AI가 추천한 법령은 본문 미포함/의미검색 오탐이 있어 전부 검증 후보로만 사용
+        from_ai: list[dict[str, Any]] = []
+        seen_ai: set[str] = set()
+        for article in ai_articles:
+            law_id = article.get("lawId")
+            if not law_id or law_id in seen_ai:
+                continue
+            seen_ai.add(law_id)
+            from_ai.append(
+                {
+                    "lawId": law_id,
+                    "mst": article.get("mst") or "",
+                    "lawName": article.get("lawName") or "",
+                    "lawKind": article.get("lawKind") or "",
+                    "category": article.get("category") or "기타",
+                    "ministry": article.get("ministry") or "",
+                    "effectiveDate": article.get("effectiveDate") or "",
+                    "promulgationDate": article.get("promulgationDate") or "",
+                    "detailUrl": article.get("detailUrl") or "",
+                    "hitCount": 0,
+                }
+            )
 
-    # hitCount 집계
-    hit_counts: dict[str, int] = {}
-    for article in ai_articles:
-        lid = article.get("lawId")
-        if lid:
-            hit_counts[lid] = hit_counts.get(lid, 0) + 1
+        # 이름만 비슷한 법령은 제외하고, AI·본문검색 후보만 실제 조문으로 검증
+        candidates = merge_laws(from_ai, body_hits)
+        # 검증 비용을 위해 상위 후보만 확인
+        candidates = candidates[: max(display * 2, 40)]
 
-    laws = merge_laws(name_hits, from_ai, body_hits)
-    for law in laws:
-        law["hitCount"] = hit_counts.get(law["lawId"], 0)
+        sem = asyncio.Semaphore(6)
 
-    # 키워드와 일치하는 조문이 확인된 법령만 표시
-    # (이름만 비슷한 법령·본문검색 추정 결과는 제외)
-    laws = [law for law in laws if law.get("hitCount", 0) > 0]
+        async def verify_law(law: dict[str, Any]) -> dict[str, Any] | None:
+            async with sem:
+                try:
+                    articles = await fetch_law_articles(
+                        client,
+                        law,
+                        tokens,
+                        full_query=query,
+                        max_articles=8,
+                        fallback_primary=False,
+                    )
+                except Exception:  # noqa: BLE001
+                    return None
+                if not articles:
+                    return None
+                verified = dict(law)
+                verified["hitCount"] = len(articles)
+                # 본문 조회로 법령명이 보강된 경우 반영
+                if law.get("lawName"):
+                    verified["lawName"] = law["lawName"]
+                if law.get("category"):
+                    verified["category"] = law["category"]
+                if law.get("effectiveDate"):
+                    verified["effectiveDate"] = law["effectiveDate"]
+                if law.get("ministry"):
+                    verified["ministry"] = law["ministry"]
+                return verified
 
-    # 법률을 먼저, 그다음 관련도·이름 순
+        verified_list = await asyncio.gather(*[verify_law(law) for law in candidates])
+
+    laws = [law for law in verified_list if law]
     laws.sort(key=lambda law: (*score_law(law, query, primary), -law.get("hitCount", 0)))
 
-    # 화면에 법률을 우선 노출하되, 법률이 너무 적으면 시행령/규칙도 포함
     statutes = [law for law in laws if law["category"] == "법률"]
     others = [law for law in laws if law["category"] != "법률"]
     ordered = statutes + others

@@ -67,7 +67,7 @@ function lawCardHtml(law) {
       <span class="law-card-meta">
         ${law.ministry ? `<span>${escapeHtml(law.ministry)}</span>` : ""}
         ${law.effectiveDate ? `<span>시행 ${escapeHtml(law.effectiveDate)}</span>` : ""}
-        ${law.hitCount ? `<span>관련조문 힌트 ${law.hitCount}</span>` : ""}
+        ${law.hitCount ? `<span>관련조문 ${law.hitCount}</span>` : ""}
       </span>
       <span class="law-card-action">새 탭에서 검색 →</span>
     </button>`;
