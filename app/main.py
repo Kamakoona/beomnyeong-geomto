@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -26,12 +26,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
+# 크롬 등 강한 캐시를 피하기 위해 배포마다 경로를 바꿈
+APP_BUILD = "20260803c"
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
 HEAD_INJECT = (
     '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'
     '    <meta http-equiv="Pragma" content="no-cache" />\n'
     "    "
 )
+NO_STORE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+    "Clear-Site-Data": '"cache", "storage"',
+}
 
 
 @lru_cache(maxsize=64)
@@ -51,46 +59,66 @@ def asset_version(rel_url: str) -> str:
 
 
 def html_page(filename: str) -> HTMLResponse:
-    """HTML을 내려줄 때 정적 자산 URL에 버전을 붙여 캐시를 무효화한다."""
+    """HTML을 내려줄 때 정적 자산 URL에 빌드 경로·버전을 붙여 캐시를 무효화한다."""
     text = (STATIC_DIR / filename).read_text(encoding="utf-8")
     if "<head>" in text and "http-equiv=\"Cache-Control\"" not in text:
         text = text.replace("<head>", f"<head>\n    {HEAD_INJECT}", 1)
+    # /static/foo.js -> /a/{build}/foo.js?v=hash  (경로 자체 변경으로 크롬 캐시 우회)
     text = ASSET_REF_RE.sub(
-        lambda m: f'{m.group(1)}{m.group(2)}?v={asset_version(m.group(2))}{m.group(3)}',
+        lambda m: (
+            f'{m.group(1)}/a/{APP_BUILD}/{m.group(2).removeprefix("/static/")}'
+            f'?v={asset_version(m.group(2))}{m.group(3)}'
+        ),
         text,
     )
-    return HTMLResponse(
-        content=text,
-        headers={
-            "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-            # Chrome이 이 사이트의 HTTP 캐시를 비우도록 유도 (HTTPS에서만 동작)
-            "Clear-Site-Data": '"cache"',
-        },
-    )
+    # 내부 홈 링크도 새 경로로
+    text = text.replace('href="/"', f'href="/home?b={APP_BUILD}"')
+    return HTMLResponse(content=text, headers=dict(NO_STORE_HEADERS))
 
 
 class StaticCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         path = request.url.path
-        if path.startswith("/static/"):
+        if path.startswith("/static/") or path.startswith("/a/"):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
-        elif path in {"/", "/law", "/ordin"}:
-            response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Clear-Site-Data"] = '"cache"'
+        elif path in {"/", "/home", "/law", "/ordin"}:
+            for key, value in NO_STORE_HEADERS.items():
+                response.headers[key] = value
         return response
 
 
-app = FastAPI(title="법제처 법령 조문 검색", version="1.3.1")
+app = FastAPI(title="법제처 법령 조문 검색", version="1.3.2")
 app.add_middleware(StaticCacheMiddleware)
+
+
+@app.get("/a/{build}/{filename:path}")
+async def versioned_asset(build: str, filename: str) -> FileResponse:
+    """빌드별 경로로 정적 파일을 제공해 브라우저 캐시를 우회한다."""
+    target = (STATIC_DIR / filename).resolve()
+    if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.is_file():
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+    return FileResponse(
+        target,
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
-async def index() -> HTMLResponse:
+async def root_redirect() -> RedirectResponse:
+    """예전 캐시된 '/' 문서를 피해 새 경로로 보낸다."""
+    return RedirectResponse(
+        url=f"/home?b={APP_BUILD}",
+        status_code=307,
+        headers=dict(NO_STORE_HEADERS),
+    )
+
+
+@app.get("/home")
+async def home() -> HTMLResponse:
     return html_page("index.html")
 
 
@@ -112,6 +140,7 @@ async def health() -> dict:
         "ok": True,
         "oc": os.getenv("LAW_API_OC", "test"),
         "version": app.version,
+        "build": APP_BUILD,
     }
 
 
