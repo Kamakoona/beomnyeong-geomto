@@ -199,7 +199,24 @@ body {
   background: rgba(255, 255, 255, 0.92);
 }
 
-.search-bar button:hover {
+.search-bar .stop-btn {
+  border: 1px solid rgba(140, 48, 48, 0.28);
+  background: rgba(255, 248, 246, 0.95);
+  color: #8c3030;
+  font-weight: 600;
+}
+
+.search-bar .stop-btn:hover {
+  background: #8c3030;
+  color: #fff8f6;
+}
+
+.search-bar .stop-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.search-bar button:hover:not(.stop-btn):not(.ghost-btn) {
   background: var(--accent-deep);
 }
 
@@ -976,6 +993,14 @@ mark.hit.inline-hit {
   .search-bar {
     grid-template-columns: 1fr;
     border-radius: 18px;
+  }
+
+  .search-bar.with-secondary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .search-bar.with-secondary input {
+    grid-column: 1 / -1;
   }
 
   .search-bar button {

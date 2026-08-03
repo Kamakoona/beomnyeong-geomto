@@ -1,12 +1,30 @@
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
 const button = document.getElementById("search-btn");
+const stopBtn = document.getElementById("stop-btn");
+const searchBar = form?.querySelector(".search-bar");
 const statusEl = document.getElementById("status");
 const metaEl = document.getElementById("meta");
 const lawListEl = document.getElementById("law-list");
 const chips = document.getElementById("chips");
 
 let latestOrdinances = [];
+let searchAbort = null;
+
+function setSearching(isSearching) {
+  button.disabled = isSearching;
+  button.textContent = isSearching ? "검색 중…" : "법률 찾기";
+  if (stopBtn) {
+    stopBtn.hidden = !isSearching;
+    stopBtn.disabled = !isSearching;
+  }
+  searchBar?.classList.toggle("with-secondary", isSearching);
+}
+
+function abortSearch() {
+  if (!searchAbort) return;
+  searchAbort.abort();
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -212,8 +230,11 @@ async function runSearch(query) {
   const q = query.trim();
   if (!q) return;
 
-  button.disabled = true;
-  button.textContent = "검색 중…";
+  if (searchAbort) searchAbort.abort();
+  const controller = new AbortController();
+  searchAbort = controller;
+
+  setSearching(true);
   setStatus("관련 법률을 찾는 중입니다…");
   metaEl.hidden = true;
   metaEl.innerHTML = "";
@@ -224,9 +245,12 @@ async function runSearch(query) {
   hideOrdinancePrompt();
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=80`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=80`, {
+      signal: controller.signal,
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "검색에 실패했습니다.");
+    if (controller.signal.aborted) return;
     setStatus("");
     const laws = Array.isArray(data.laws) ? data.laws : [];
     latestOrdinances = Array.isArray(data.ordinances) ? data.ordinances : [];
@@ -235,18 +259,32 @@ async function runSearch(query) {
       showOrdinancePrompt(data.query || q, latestOrdinances);
     }
   } catch (err) {
+    if (err?.name === "AbortError") {
+      if (searchAbort === controller) {
+        setStatus("검색을 중단했습니다.");
+        lawListEl.innerHTML = "";
+        lawListEl._laws = [];
+      }
+      return;
+    }
     setStatus(err.message || "검색 중 오류가 발생했습니다.", true);
     lawListEl.innerHTML = "";
     lawListEl._laws = [];
   } finally {
-    button.disabled = false;
-    button.textContent = "법률 찾기";
+    if (searchAbort === controller) {
+      searchAbort = null;
+      setSearching(false);
+    }
   }
 }
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   runSearch(input.value);
+});
+
+stopBtn?.addEventListener("click", () => {
+  abortSearch();
 });
 
 chips.addEventListener("click", (event) => {
