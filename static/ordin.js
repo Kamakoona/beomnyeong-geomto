@@ -1,3 +1,10 @@
+import {
+  escapeHtml,
+  encodeLawUrl,
+  highlightText,
+  setStatus as setStatusEl,
+} from "./shared.js";
+
 const params = new URLSearchParams(location.search);
 const initialQuery = (params.get("q") || "").trim();
 const initialMst = (params.get("mst") || "").trim();
@@ -23,64 +30,8 @@ function setOpenAllVisible(visible) {
   searchBar?.classList.toggle("with-secondary", Boolean(visible));
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function queryTerms(query) {
-  const q = (query || "").trim();
-  if (!q) return [];
-  const parts = q.split(/[\s,/·ㆍ]+/).filter((t) => t.length >= 2);
-  const terms = [];
-  const seen = new Set();
-  for (const term of [q, ...parts]) {
-    if (!term || seen.has(term)) continue;
-    seen.add(term);
-    terms.push(term);
-  }
-  terms.sort((a, b) => b.length - a.length);
-  return terms;
-}
-
-function highlightText(text, query) {
-  const source = String(text ?? "");
-  const terms = queryTerms(query);
-  if (!terms.length) return escapeHtml(source);
-  const escaped = escapeHtml(source);
-  const pattern = terms.map(escapeRegExp).map(escapeHtml).join("|");
-  if (!pattern) return escaped;
-  return escaped.replace(new RegExp(`(${pattern})`, "gi"), '<mark class="hit">$1</mark>');
-}
-
-function encodeLawUrl(url) {
-  const value = String(url || "");
-  if (!value) return "";
-  try {
-    return encodeURI(decodeURI(value));
-  } catch {
-    return value;
-  }
-}
-
 function setStatus(message, isError = false) {
-  if (!message) {
-    statusEl.hidden = true;
-    statusEl.textContent = "";
-    statusEl.classList.remove("error");
-    return;
-  }
-  statusEl.hidden = false;
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
+  setStatusEl(statusEl, message, isError);
 }
 
 function syncUrl({ query = currentQuery, mst = currentMst, name = currentName, mode = "" } = {}) {

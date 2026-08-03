@@ -1,3 +1,10 @@
+import {
+  escapeHtml,
+  encodeLawUrl,
+  highlightText,
+  setStatus as setStatusEl,
+} from "./shared.js";
+
 const params = new URLSearchParams(location.search);
 const lawId = (params.get("lawId") || "").trim();
 const lawName = (params.get("lawName") || "").trim();
@@ -39,63 +46,8 @@ function openFullArticlesWindow() {
   if (win) win.opener = null;
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function queryTerms(query) {
-  const q = (query || "").trim();
-  if (!q) return [];
-  const parts = q.split(/[\s,/·ㆍ]+/).filter((t) => t.length >= 2);
-  const terms = [];
-  const seen = new Set();
-  // 전체 문장을 먼저, 그다음 개별 토큰
-  for (const term of [q, ...parts]) {
-    if (!term || seen.has(term)) continue;
-    seen.add(term);
-    terms.push(term);
-  }
-  // 긴 키워드부터 치환해 부분 중복 하이라이트 깨짐을 줄임
-  terms.sort((a, b) => b.length - a.length);
-  return terms;
-}
-
-function highlightText(text, query) {
-  const source = String(text ?? "");
-  const terms = queryTerms(query);
-  if (!terms.length) return escapeHtml(source);
-
-  const escaped = escapeHtml(source);
-  const pattern = terms.map(escapeRegExp).map(escapeHtml).join("|");
-  if (!pattern) return escaped;
-
-  try {
-    const re = new RegExp(`(${pattern})`, "gi");
-    return escaped.replace(re, `<mark class="hit">$1</mark>`);
-  } catch {
-    return escaped;
-  }
-}
-
 function setStatus(message, isError = false) {
-  if (!message) {
-    statusEl.hidden = true;
-    statusEl.textContent = "";
-    statusEl.classList.remove("error");
-    return;
-  }
-  statusEl.hidden = false;
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
+  setStatusEl(statusEl, message, isError);
 }
 
 function currencyBadge(currency) {
@@ -180,18 +132,6 @@ function instrumentBlock(cat, instrument) {
         ${currencyMeta(currency)}
       </div>
     </div>`;
-}
-
-function encodeLawUrl(url) {
-  const value = String(url || "");
-  if (!value) return "";
-  if (value.startsWith("data:") || value.startsWith("blob:")) return value;
-  try {
-    // 한글 경로가 포함된 법령 URL을 안전하게 인코딩
-    return encodeURI(decodeURI(value));
-  } catch {
-    return value;
-  }
 }
 
 function openExternalWindow(url) {

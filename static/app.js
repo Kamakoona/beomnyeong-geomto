@@ -1,3 +1,5 @@
+import { escapeHtml, setStatus as setStatusEl } from "./shared.js";
+
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
 const button = document.getElementById("search-btn");
@@ -26,25 +28,8 @@ function abortSearch() {
   searchAbort.abort();
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function setStatus(message, isError = false) {
-  if (!message) {
-    statusEl.hidden = true;
-    statusEl.textContent = "";
-    statusEl.classList.remove("error");
-    return;
-  }
-  statusEl.hidden = false;
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
+  setStatusEl(statusEl, message, isError);
 }
 
 function openInNewTab(url) {

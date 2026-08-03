@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
+import time
 from datetime import date, datetime
 from typing import Any
 
@@ -26,9 +29,59 @@ HTTP_HEADERS = {
     "Referer": "https://www.law.go.kr/",
 }
 
+# 법령 API 응답 짧은 TTL 캐시 (동일 검색/조문 재조회 가속)
+_JSON_CACHE: dict[str, tuple[float, Any]] = {}
+_JSON_CACHE_TTL_SEC = 30 * 60
+_JSON_CACHE_MAX = 256
+_TAG_RE = re.compile(r"<[^>]+>")
+_shared_client: httpx.AsyncClient | None = None
+_shared_client_lock = asyncio.Lock()
+
 
 def get_oc() -> str:
     return os.getenv("LAW_API_OC", DEFAULT_OC)
+
+
+async def get_http_client() -> httpx.AsyncClient:
+    """프로세스 전역 AsyncClient — 연결 재사용."""
+    global _shared_client
+    if _shared_client is not None and not _shared_client.is_closed:
+        return _shared_client
+    async with _shared_client_lock:
+        if _shared_client is None or _shared_client.is_closed:
+            _shared_client = httpx.AsyncClient(
+                headers=HTTP_HEADERS,
+                follow_redirects=True,
+                timeout=45.0,
+            )
+        return _shared_client
+
+
+def _json_cache_key(path: str, params: dict[str, Any]) -> str:
+    payload = json.dumps({"path": path, "params": params}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _json_cache_get(key: str) -> Any | None:
+    item = _JSON_CACHE.get(key)
+    if not item:
+        return None
+    expires_at, value = item
+    if expires_at < time.monotonic():
+        _JSON_CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _json_cache_set(key: str, value: Any) -> None:
+    if len(_JSON_CACHE) >= _JSON_CACHE_MAX:
+        now = time.monotonic()
+        expired = [k for k, (exp, _) in _JSON_CACHE.items() if exp < now]
+        for k in expired:
+            _JSON_CACHE.pop(k, None)
+        while len(_JSON_CACHE) >= _JSON_CACHE_MAX:
+            _JSON_CACHE.pop(next(iter(_JSON_CACHE)))
+    _JSON_CACHE[key] = (time.monotonic() + _JSON_CACHE_TTL_SEC, value)
 
 
 def classify_law_kind(kind_name: str, law_name: str = "") -> str:
@@ -161,9 +214,15 @@ def normalize_article(raw: dict[str, Any], *, fallback_category: str | None = No
 
 async def fetch_json(client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> dict[str, Any]:
     query = {"OC": get_oc(), "type": "JSON", **params}
+    cache_key = _json_cache_key(path, query)
+    cached = _json_cache_get(cache_key)
+    if cached is not None:
+        return cached
     response = await client.get(f"{LAW_BASE}/{path}", params=query, timeout=45.0)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    _json_cache_set(cache_key, data)
+    return data
 
 
 def as_list(value: Any) -> list[Any]:
@@ -241,63 +300,63 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
     if not q:
         return []
 
-    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
-        data = await fetch_json(
-            client,
-            "lawSearch.do",
-            {
-                "target": "ordin",
-                "query": q,
-                "search": 2,
-                "display": min(display, 50),
-                "page": 1,
-            },
-        )
-        root = data.get("OrdinSearch") or {}
-        items = as_list(root.get("law"))
-        results: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            mst = str(item.get("자치법규일련번호") or "").strip()
-            ordin_id = str(item.get("자치법규ID") or "").strip()
-            key = mst or ordin_id
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            name = item.get("자치법규명") or ""
-            org = item.get("지자체기관명") or ""
-            # 법률의 /법령/{이름} 과 같은 포털 본문 화면 (DRF HTML 뷰어가 아님)
-            portal = (
-                f"https://www.law.go.kr/자치법규/{name}"
-                if name
-                else (
-                    f"https://www.law.go.kr/LSW/ordinInfoP.do"
-                    f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
-                )
-            )
-            detail = (
+    client = await get_http_client()
+    data = await fetch_json(
+        client,
+        "lawSearch.do",
+        {
+            "target": "ordin",
+            "query": q,
+            "search": 2,
+            "display": min(display, 50),
+            "page": 1,
+        },
+    )
+    root = data.get("OrdinSearch") or {}
+    items = as_list(root.get("law"))
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        mst = str(item.get("자치법규일련번호") or "").strip()
+        ordin_id = str(item.get("자치법규ID") or "").strip()
+        key = mst or ordin_id
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        name = item.get("자치법규명") or ""
+        org = item.get("지자체기관명") or ""
+        # 법률의 /법령/{이름} 과 같은 포털 본문 화면 (DRF HTML 뷰어가 아님)
+        portal = (
+            f"https://www.law.go.kr/자치법규/{name}"
+            if name
+            else (
                 f"https://www.law.go.kr/LSW/ordinInfoP.do"
                 f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
-                if mst
-                else portal
             )
-            results.append(
-                {
-                    "ordinId": ordin_id,
-                    "mst": mst,
-                    "ordinName": name,
-                    "orgName": org,
-                    "ordinKind": item.get("자치법규종류") or "",
-                    "category": "자치법규",
-                    "effectiveDate": format_date(item.get("시행일자")),
-                    "promulgationDate": format_date(item.get("공포일자")),
-                    "detailUrl": detail,
-                    "sourceUrl": portal,
-                }
-            )
-        return results
+        )
+        detail = (
+            f"https://www.law.go.kr/LSW/ordinInfoP.do"
+            f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
+            if mst
+            else portal
+        )
+        results.append(
+            {
+                "ordinId": ordin_id,
+                "mst": mst,
+                "ordinName": name,
+                "orgName": org,
+                "ordinKind": item.get("자치법규종류") or "",
+                "category": "자치법규",
+                "effectiveDate": format_date(item.get("시행일자")),
+                "promulgationDate": format_date(item.get("공포일자")),
+                "detailUrl": detail,
+                "sourceUrl": portal,
+            }
+        )
+    return results
 
 
 def parse_ymd(value: str | int | None) -> date | None:
@@ -752,6 +811,35 @@ def blocks_to_plain_text(blocks: list[dict[str, Any]]) -> str:
     return "\n".join(p for p in parts if p).strip()
 
 
+def unit_plain_text_fast(unit: dict[str, Any]) -> str:
+    """검색 검증용 빠른 평문 추출 (SVG/이미지 파싱 생략)."""
+    parts: list[str] = []
+
+    def add(value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            cleaned = _TAG_RE.sub("", value).strip()
+            if cleaned:
+                parts.append(cleaned)
+            return
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+            return
+        if isinstance(value, dict):
+            for key in ("조문내용", "항내용", "호내용", "목내용", "content"):
+                if key in value:
+                    add(value[key])
+            for key in ("항", "호", "목"):
+                if key in value:
+                    add(value[key])
+
+    add(unit.get("조문내용"))
+    add(unit.get("항"))
+    return "\n".join(parts)
+
+
 def flatten_article_unit(unit: dict[str, Any]) -> str:
     return blocks_to_plain_text(build_article_blocks(unit))
 
@@ -795,16 +883,16 @@ def build_article_blocks(unit: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def fetch_latest_article(law_id: str, jo: str) -> dict[str, Any] | None:
-    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
-        data = await fetch_json(
-            client,
-            "lawService.do",
-            {
-                "target": "eflaw",
-                "ID": law_id.zfill(6) if str(law_id).isdigit() else law_id,
-                "JO": jo,
-            },
-        )
+    client = await get_http_client()
+    data = await fetch_json(
+        client,
+        "lawService.do",
+        {
+            "target": "eflaw",
+            "ID": law_id.zfill(6) if str(law_id).isdigit() else law_id,
+            "JO": jo,
+        },
+    )
 
     root = data.get("법령") or {}
     basic = root.get("기본정보") or {}
@@ -848,6 +936,7 @@ async def fetch_law_articles(
     full_query: str = "",
     max_articles: int = 30,
     fallback_primary: bool = True,
+    rich: bool = True,
 ) -> list[dict[str, Any]]:
     data = await fetch_json(
         client,
@@ -893,10 +982,16 @@ async def fetch_law_articles(
             if jo_flag and jo_flag != "조문":
                 continue
 
-            blocks = build_article_blocks(unit)
-            content = blocks_to_plain_text(blocks)
+            if rich:
+                blocks = build_article_blocks(unit)
+                content = blocks_to_plain_text(blocks)
+                has_image = any(b.get("type") == "image" for b in blocks)
+            else:
+                blocks = []
+                content = unit_plain_text_fast(unit)
+                has_image = False
+
             title = unit.get("조문제목") or ""
-            has_image = any(b.get("type") == "image" for b in blocks)
             if not content and not title and not has_image:
                 continue
 
@@ -1076,75 +1171,76 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     tokens = query_tokens(query)
     primary = primary_keyword(query, tokens)
 
-    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
-        tasks = [
-            search_ai_articles(client, query, min(display, 40)),
-            search_laws(client, query, search=2, display=20),
-            search_laws(client, primary, search=2, display=20),
-        ]
-        results = await asyncio.gather(*tasks)
-        ai_articles = results[0]
-        body_hits = merge_laws(results[1], results[2])
+    client = await get_http_client()
+    tasks = [
+        search_ai_articles(client, query, min(display, 40)),
+        search_laws(client, query, search=2, display=20),
+        search_laws(client, primary, search=2, display=20),
+    ]
+    results = await asyncio.gather(*tasks)
+    ai_articles = results[0]
+    body_hits = merge_laws(results[1], results[2])
 
-        # AI가 추천한 법령은 본문 미포함/의미검색 오탐이 있어 전부 검증 후보로만 사용
-        from_ai: list[dict[str, Any]] = []
-        seen_ai: set[str] = set()
-        for article in ai_articles:
-            law_id = article.get("lawId")
-            if not law_id or law_id in seen_ai:
-                continue
-            seen_ai.add(law_id)
-            from_ai.append(
-                {
-                    "lawId": law_id,
-                    "mst": article.get("mst") or "",
-                    "lawName": article.get("lawName") or "",
-                    "lawKind": article.get("lawKind") or "",
-                    "category": article.get("category") or "기타",
-                    "ministry": article.get("ministry") or "",
-                    "effectiveDate": article.get("effectiveDate") or "",
-                    "promulgationDate": article.get("promulgationDate") or "",
-                    "detailUrl": article.get("detailUrl") or "",
-                    "hitCount": 0,
-                }
-            )
+    # AI가 추천한 법령은 본문 미포함/의미검색 오탐이 있어 전부 검증 후보로만 사용
+    from_ai: list[dict[str, Any]] = []
+    seen_ai: set[str] = set()
+    for article in ai_articles:
+        law_id = article.get("lawId")
+        if not law_id or law_id in seen_ai:
+            continue
+        seen_ai.add(law_id)
+        from_ai.append(
+            {
+                "lawId": law_id,
+                "mst": article.get("mst") or "",
+                "lawName": article.get("lawName") or "",
+                "lawKind": article.get("lawKind") or "",
+                "category": article.get("category") or "기타",
+                "ministry": article.get("ministry") or "",
+                "effectiveDate": article.get("effectiveDate") or "",
+                "promulgationDate": article.get("promulgationDate") or "",
+                "detailUrl": article.get("detailUrl") or "",
+                "hitCount": 0,
+            }
+        )
 
-        # 이름만 비슷한 법령은 제외하고, AI·본문검색 후보만 실제 조문으로 검증
-        candidates = merge_laws(from_ai, body_hits)
-        # 검증 비용을 위해 상위 후보만 확인
-        candidates = candidates[: max(display * 2, 40)]
+    # 이름만 비슷한 법령은 제외하고, AI·본문검색 후보만 실제 조문으로 검증
+    candidates = merge_laws(from_ai, body_hits)
+    # 검증 비용 제한: 상위 소수만 본문 확인 (기존 max(display*2,40) → 최대 24)
+    candidates = candidates[: min(max(display, 16), 24)]
 
-        sem = asyncio.Semaphore(6)
+    sem = asyncio.Semaphore(8)
 
-        async def verify_law(law: dict[str, Any]) -> dict[str, Any] | None:
-            async with sem:
-                try:
-                    articles = await fetch_law_articles(
-                        client,
-                        law,
-                        tokens,
-                        full_query=query,
-                        max_articles=8,
-                        fallback_primary=False,
-                    )
-                except Exception:  # noqa: BLE001
-                    return None
-                if not articles:
-                    return None
-                verified = dict(law)
-                verified["hitCount"] = len(articles)
-                # 본문 조회로 법령명이 보강된 경우 반영
-                if law.get("lawName"):
-                    verified["lawName"] = law["lawName"]
-                if law.get("category"):
-                    verified["category"] = law["category"]
-                if law.get("effectiveDate"):
-                    verified["effectiveDate"] = law["effectiveDate"]
-                if law.get("ministry"):
-                    verified["ministry"] = law["ministry"]
-                return verified
+    async def verify_law(law: dict[str, Any]) -> dict[str, Any] | None:
+        async with sem:
+            try:
+                articles = await fetch_law_articles(
+                    client,
+                    law,
+                    tokens,
+                    full_query=query,
+                    max_articles=8,
+                    fallback_primary=False,
+                    rich=False,
+                )
+            except Exception:  # noqa: BLE001
+                return None
+            if not articles:
+                return None
+            verified = dict(law)
+            verified["hitCount"] = len(articles)
+            # 본문 조회로 법령명이 보강된 경우 반영
+            if law.get("lawName"):
+                verified["lawName"] = law["lawName"]
+            if law.get("category"):
+                verified["category"] = law["category"]
+            if law.get("effectiveDate"):
+                verified["effectiveDate"] = law["effectiveDate"]
+            if law.get("ministry"):
+                verified["ministry"] = law["ministry"]
+            return verified
 
-        verified_list = await asyncio.gather(*[verify_law(law) for law in candidates])
+    verified_list = await asyncio.gather(*[verify_law(law) for law in candidates])
 
     laws = [law for law in verified_list if law]
     laws.sort(key=lambda law: (*score_law(law, query, primary), -law.get("hitCount", 0)))
@@ -1398,27 +1494,27 @@ async def compare_three_tier(
     """선택한 법률과 관련 시행령·시행규칙의 관련 조문을 3단으로 반환."""
     tokens = query_tokens(query)
 
-    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
-        companions, related = await resolve_companions(client, law_id, law_name)
-        targets = [
-            ("법률", companions["법률"]),
-            ("시행령", companions["시행령"]),
-            ("시행규칙", companions["시행규칙"]),
+    client = await get_http_client()
+    companions, related = await resolve_companions(client, law_id, law_name)
+    targets = [
+        ("법률", companions["법률"]),
+        ("시행령", companions["시행령"]),
+        ("시행규칙", companions["시행규칙"]),
+    ]
+    columns_raw = await asyncio.gather(
+        *[
+            _load_instrument_column(
+                client,
+                label,
+                law,
+                tokens=tokens,
+                full_query=query,
+                max_articles=max_articles,
+                fallback_primary=False,
+            )
+            for label, law in targets
         ]
-        columns_raw = await asyncio.gather(
-            *[
-                _load_instrument_column(
-                    client,
-                    label,
-                    law,
-                    tokens=tokens,
-                    full_query=query,
-                    max_articles=max_articles,
-                    fallback_primary=False,
-                )
-                for label, law in targets
-            ]
-        )
+    )
 
     columns: dict[str, list[dict[str, Any]]] = {"법률": [], "시행령": [], "시행규칙": []}
     instruments: dict[str, dict[str, Any] | None] = {
@@ -1453,27 +1549,27 @@ async def compare_three_tier_full(
     max_articles: int = 3000,
 ) -> dict[str, Any]:
     """선택한 법률·시행령·시행규칙의 전체 조문을 3단으로 반환(키워드 필터 없음)."""
-    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
-        companions, related = await resolve_companions(client, law_id, law_name)
-        targets = [
-            ("법률", companions["법률"]),
-            ("시행령", companions["시행령"]),
-            ("시행규칙", companions["시행규칙"]),
+    client = await get_http_client()
+    companions, related = await resolve_companions(client, law_id, law_name)
+    targets = [
+        ("법률", companions["법률"]),
+        ("시행령", companions["시행령"]),
+        ("시행규칙", companions["시행규칙"]),
+    ]
+    columns_raw = await asyncio.gather(
+        *[
+            _load_instrument_column(
+                client,
+                label,
+                law,
+                tokens=[],
+                full_query="",
+                max_articles=max_articles,
+                fallback_primary=False,
+            )
+            for label, law in targets
         ]
-        columns_raw = await asyncio.gather(
-            *[
-                _load_instrument_column(
-                    client,
-                    label,
-                    law,
-                    tokens=[],
-                    full_query="",
-                    max_articles=max_articles,
-                    fallback_primary=False,
-                )
-                for label, law in targets
-            ]
-        )
+    )
 
     columns: dict[str, list[dict[str, Any]]] = {"법률": [], "시행령": [], "시행규칙": []}
     instruments: dict[str, dict[str, Any] | None] = {
@@ -1530,15 +1626,15 @@ async def compare_ordinance(
         }
 
     tokens = [] if full else query_tokens(query)
-    async with httpx.AsyncClient(headers=HTTP_HEADERS, follow_redirects=True) as client:
-        data = await fetch_json(
-            client,
-            "lawService.do",
-            {
-                "target": "ordin",
-                "MST": mst,
-            },
-        )
+    client = await get_http_client()
+    data = await fetch_json(
+        client,
+        "lawService.do",
+        {
+            "target": "ordin",
+            "MST": mst,
+        },
+    )
 
     root = data.get("LawService")
     if not isinstance(root, dict):

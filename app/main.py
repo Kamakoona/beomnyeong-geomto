@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
@@ -28,7 +29,7 @@ STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
 # 크롬 등 강한 캐시를 피하기 위해 배포마다 경로를 바꿈
-APP_BUILD = "20260803i"
+APP_BUILD = "20260803j"
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
 HEAD_INJECT = (
     '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'
@@ -88,7 +89,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="법제처 법령 조문 검색", version="1.3.8")
+app = FastAPI(title="법제처 법령 조문 검색", version="1.3.9")
 app.add_middleware(StaticCacheMiddleware)
 
 
@@ -180,14 +181,17 @@ async def search(
         raise HTTPException(status_code=400, detail="검색어를 입력해 주세요.")
 
     try:
-        laws = await search_law_list(query, display=display)
+        laws, ordinances = await asyncio.gather(
+            search_law_list(query, display=display),
+            search_ordinance_list(query, display=30),
+            return_exceptions=True,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"법령 API 호출 실패: {exc}") from exc
 
-    ordinances: list = []
-    try:
-        ordinances = await search_ordinance_list(query, display=30)
-    except Exception:  # noqa: BLE001
+    if isinstance(laws, Exception):
+        raise HTTPException(status_code=502, detail=f"법령 API 호출 실패: {laws}") from laws
+    if isinstance(ordinances, Exception):
         ordinances = []
 
     return {
