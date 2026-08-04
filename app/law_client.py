@@ -1246,11 +1246,16 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     parts = matching_tokens(query, tokens)
 
     client = await get_http_client()
+    # 짧은 원문 키워드(예: 영업)는 본문 검색 순위가 매우 낮아 깊게 조회한다
+    # (복합어 분절 primary가 짧더라도 원문이 길면 기본 깊이 유지)
+    short_query = len(query.strip()) <= 3
+    body_display = 160 if short_query else 50
+    primary_body_display = 80 if short_query else 30
     tasks: list = [
         search_ai_articles(client, query, min(display, 40)),
         # 본문검색은 순위가 낮아도 관련 법률이 있을 수 있어 넉넉히 가져온다
-        search_laws(client, query, search=2, display=50),
-        search_laws(client, primary, search=2, display=30),
+        search_laws(client, query, search=2, display=body_display),
+        search_laws(client, primary, search=2, display=primary_body_display),
         # 복합어·핵심어 이름검색으로 관련 법률 후보를 보강 (예: 수용재결 → 수용)
         search_laws(client, primary, search=1, display=15),
     ]
@@ -1289,12 +1294,20 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
             }
         )
 
-    # 시행령·시행규칙 후보가 있으면 대응 법률도 후보에 넣는다
-    # (예: 영업손실 → AI가 공익사업법 시행규칙만 줄 때 법률·시행령도 검증)
-    parent_seeds = merge_laws(from_ai, body_hits, name_hits)
+    # 시행령·시행규칙 후보가 있으면 대응 법률도, 법률이 있으면 하위법령도 후보에 넣는다
+    # (예: 영업/영업손실 → AI·본문에 시행규칙만 있어도 법률·시행령까지 검증)
+    family_seeds = merge_laws(from_ai, body_hits, name_hits)
+
+    def strip_subordinate_suffix(law_name: str) -> str:
+        name = (law_name or "").strip()
+        for suffix in (" 시행규칙", " 시행령"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)].strip()
+        return name
+
     parent_names: list[str] = []
     seen_parent: set[str] = set()
-    for law in parent_seeds:
+    for law in family_seeds:
         name = (law.get("lawName") or "").strip()
         base = ""
         for suffix in (" 시행규칙", " 시행령"):
@@ -1304,12 +1317,14 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
         if base and base not in seen_parent:
             seen_parent.add(base)
             parent_names.append(base)
+
     parent_hits: list[dict[str, Any]] = []
+    parent_limit = 16
     if parent_names:
         parent_results = await asyncio.gather(
-            *[search_laws(client, name, search=1, display=5) for name in parent_names[:8]]
+            *[search_laws(client, name, search=1, display=5) for name in parent_names[:parent_limit]]
         )
-        for name, hits in zip(parent_names[:8], parent_results, strict=False):
+        for name, hits in zip(parent_names[:parent_limit], parent_results, strict=False):
             exact = next((h for h in hits if (h.get("lawName") or "") == name), None)
             if exact:
                 parent_hits.append(exact)
@@ -1318,16 +1333,84 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
             if soft:
                 parent_hits.append(soft)
 
-    # 이름검색·모법 후보를 앞에 두어 검증 한도에 들어가게 함
-    candidates = merge_laws(parent_hits, name_hits, body_hits, from_ai)
+    # 법률 후보의 시행령·시행규칙도 이름검색으로 보강 (본문순위가 낮아 후보 한도에 잘리는 경우 대비)
+    statute_bases: list[str] = []
+    seen_statute: set[str] = set()
+    for law in merge_laws(parent_hits, family_seeds):
+        base = strip_subordinate_suffix(law.get("lawName") or "")
+        cat = law.get("category") or classify_law_kind(law.get("lawKind") or "", law.get("lawName") or "")
+        if not base:
+            continue
+        # 하위법령에서 뽑은 모법명, 또는 법률 자체
+        if cat == "법률" or base != (law.get("lawName") or "").strip() or base in seen_parent:
+            if base not in seen_statute:
+                seen_statute.add(base)
+                statute_bases.append(base)
+
+    companion_hits: list[dict[str, Any]] = []
+    companion_queries: list[str] = []
+    for base in statute_bases[:10]:
+        companion_queries.append(f"{base} 시행령")
+        companion_queries.append(f"{base} 시행규칙")
+    if companion_queries:
+        companion_results = await asyncio.gather(
+            *[search_laws(client, qn, search=1, display=5) for qn in companion_queries]
+        )
+        for qn, hits in zip(companion_queries, companion_results, strict=False):
+            exact = next((h for h in hits if (h.get("lawName") or "") == qn), None)
+            if exact:
+                companion_hits.append(exact)
+                continue
+            soft = next((h for h in hits if qn in (h.get("lawName") or "")), None)
+            if soft:
+                companion_hits.append(soft)
+
+    # 이름에 핵심어가 있는 법령을 우선하되, 모법·하위법령 묶음은 그보다 앞에 둔다
+    # (예: '영업'은 상호에 '영업'이 많은 법령이 named_boost를 채워 공익사업법 묶음이 밀릴 수 있음)
     named_boost = [
         law
-        for law in candidates
+        for law in merge_laws(name_hits, body_hits, from_ai)
         if primary and primary in (law.get("lawName") or "")
     ]
-    candidates = merge_laws(named_boost, candidates)
-    # 검증 비용 제한
-    candidates = candidates[: min(max(display, 24), 40)]
+    # 짧은 키워드: 본문에서 법률·시행령·시행규칙이 함께 잡힌 묶음의 법률을 후보에 보강
+    trio_statutes: list[dict[str, Any]] = []
+    trio_cluster: dict[str, list[dict[str, Any]]] = {}
+    if short_query:
+        clusters: dict[str, list[dict[str, Any]]] = {}
+        for law in body_hits:
+            base = strip_subordinate_suffix(law.get("lawName") or "")
+            if not base:
+                continue
+            clusters.setdefault(base, []).append(law)
+        for base, items in clusters.items():
+            if len(items) < 3:
+                continue
+            trio_cluster[base] = items
+            statute = next((x for x in items if x.get("category") == "법률"), None)
+            if statute:
+                trio_statutes.append(statute)
+
+    candidates = merge_laws(
+        parent_hits,
+        companion_hits,
+        trio_statutes,
+        named_boost,
+        name_hits,
+        body_hits,
+        from_ai,
+    )
+    # 검증 후보 수(display와 분리). 짧은 키워드는 trio 법률 보강을 위해 넉넉히.
+    cand_cap = 70 if short_query else max(display, 40)
+    candidates = candidates[:cand_cap]
+    ai_bases = {
+        strip_subordinate_suffix(law.get("lawName") or "")
+        for law in from_ai
+        if law.get("lawName")
+    }
+    for law in candidates:
+        base = strip_subordinate_suffix(law.get("lawName") or "")
+        if base and base in ai_bases:
+            law["_aiFamily"] = True
 
     sem = asyncio.Semaphore(8)
 
@@ -1349,6 +1432,53 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
                 return None
             verified = dict(law)
             verified["hitCount"] = len(articles)
+            # 짧은 키워드 보강: 조문의 결합어(조사 제거) 길이를 랭킹에 사용
+            primary_len = len(primary)
+            best_compound = ""
+            if primary_len >= 2:
+                blob = " ".join(
+                    f"{a.get('articleTitle') or ''} {a.get('articleContent') or ''}"
+                    for a in articles
+                )
+                particles = (
+                    "으로서",
+                    "으로서",
+                    "으로부터",
+                    "으로",
+                    "에서",
+                    "에게",
+                    "보다",
+                    "처럼",
+                    "같이",
+                    "이나",
+                    "또는",
+                    "의",
+                    "에",
+                    "을",
+                    "를",
+                    "이",
+                    "가",
+                    "은",
+                    "는",
+                    "과",
+                    "와",
+                    "로",
+                    "과",
+                )
+                for raw in re.findall(
+                    rf"[가-힣]{{0,8}}{re.escape(primary)}[가-힣]{{0,8}}", blob
+                ):
+                    compound = raw
+                    for particle in particles:
+                        if compound.endswith(particle) and len(compound) > len(particle) + primary_len - 1:
+                            compound = compound[: -len(particle)]
+                            break
+                    if len(compound) > len(best_compound):
+                        best_compound = compound
+            verified["strongHit"] = bool(best_compound) and len(best_compound) > primary_len
+            verified["bestCompound"] = best_compound
+            # AI가 직접 추천한 묶음이면 짧은 키워드에서도 상단 노출
+            verified["aiFamily"] = bool(law.get("_aiFamily"))
             # 본문 조회로 법령명이 보강된 경우 반영
             if law.get("lawName"):
                 verified["lawName"] = law["lawName"]
@@ -1363,12 +1493,94 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     verified_list = await asyncio.gather(*[verify_law(law) for law in candidates])
 
     laws = [law for law in verified_list if law]
-    laws.sort(key=lambda law: (*score_law(law, query, primary), -law.get("hitCount", 0)))
 
-    statutes = [law for law in laws if law["category"] == "법률"]
-    others = [law for law in laws if law["category"] != "법률"]
-    ordered = statutes + others
-    return ordered[:display]
+    # 짧은 키워드: 본문 trio로 확인된 법률의 시행령·시행규칙도 검증해 목록에 포함
+    if short_query and trio_cluster:
+        have_ids = {law["lawId"] for law in laws}
+        companion_extra: list[dict[str, Any]] = []
+        for law in laws:
+            if law.get("category") != "법률":
+                continue
+            base = strip_subordinate_suffix(law.get("lawName") or "")
+            for item in trio_cluster.get(base, []):
+                lid = item.get("lawId")
+                if lid and lid not in have_ids:
+                    companion_extra.append(item)
+                    have_ids.add(lid)
+        if companion_extra:
+            extra_verified = await asyncio.gather(
+                *[verify_law(law) for law in companion_extra]
+            )
+            laws.extend([law for law in extra_verified if law])
+
+    if short_query:
+        # 이름에 키워드가 없어도, AI 추천 묶음·조문 결합어(영업손실 등)가 있는 법령을 위로
+        laws.sort(
+            key=lambda law: (
+                0 if law.get("category") == "법률" else 1,
+                0 if law.get("aiFamily") else 1,
+                0 if law.get("strongHit") else 1,
+                -len(law.get("bestCompound") or ""),
+                -law.get("hitCount", 0),
+                0 if primary and primary in (law.get("lawName") or "") else 1,
+                len(law.get("lawName") or ""),
+            )
+        )
+    else:
+        laws.sort(
+            key=lambda law: (*score_law(law, query, primary), -law.get("hitCount", 0))
+        )
+
+    # 법률 순위 기준으로 정렬하되, 같은 모법의 시행령·시행규칙을 바로 뒤에 붙인다
+    statutes = [law for law in laws if law.get("category") == "법률"]
+    companions_by_base: dict[str, list[dict[str, Any]]] = {}
+    for law in laws:
+        if law.get("category") == "법률":
+            continue
+        base = strip_subordinate_suffix(law.get("lawName") or "")
+        if not base:
+            continue
+        companions_by_base.setdefault(base, []).append(law)
+
+    ordered: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for statute in statutes:
+        sid = statute.get("lawId") or ""
+        if sid and sid in seen_ids:
+            continue
+        if len(ordered) >= display:
+            break
+        if sid:
+            seen_ids.add(sid)
+        ordered.append(statute)
+        base = strip_subordinate_suffix(statute.get("lawName") or "")
+        for comp in companions_by_base.get(base, []):
+            if len(ordered) >= display:
+                break
+            cid = comp.get("lawId") or ""
+            if cid and cid in seen_ids:
+                continue
+            if cid:
+                seen_ids.add(cid)
+            ordered.append(comp)
+    if len(ordered) < display:
+        for law in laws:
+            if len(ordered) >= display:
+                break
+            lid = law.get("lawId") or ""
+            if lid and lid not in seen_ids:
+                seen_ids.add(lid)
+                ordered.append(law)
+
+    cleaned: list[dict[str, Any]] = []
+    for law in ordered[:display]:
+        item = dict(law)
+        item.pop("strongHit", None)
+        item.pop("bestCompound", None)
+        item.pop("aiFamily", None)
+        item.pop("_aiFamily", None)
+        cleaned.append(item)
+    return cleaned
 
 
 async def resolve_law_by_id(
