@@ -295,17 +295,12 @@ async def search_laws(
 
 
 async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str, Any]]:
-    """키워드가 조문 본문에 실제 포함된 자치법규만 반환한다.
-
-    Open API 본문검색 후보는 오탐이 있어, 상세 조문 조회와 동일한
-    기준으로 검증한 뒤 hitCount>0 인 항목만 남긴다.
-    """
+    """키워드 본문검색으로 자치법규 목록을 반환한다."""
     q = (query or "").strip()
     if not q:
         return []
 
     client = await get_http_client()
-    # 검증 탈락을 감안해 후보를 넉넉히 받은 뒤 display 개수만 반환
     data = await fetch_json(
         client,
         "lawSearch.do",
@@ -313,7 +308,7 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
             "target": "ordin",
             "query": q,
             "search": 2,
-            "display": 50,
+            "display": min(display, 50),
             "page": 1,
         },
     )
@@ -359,52 +354,9 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
                 "promulgationDate": format_date(item.get("공포일자")),
                 "detailUrl": detail,
                 "sourceUrl": portal,
-                "hitCount": 0,
             }
         )
-
-    candidates = [item for item in results if item.get("mst")]
-    if not candidates:
-        return []
-
-    sem = asyncio.Semaphore(8)
-
-    async def verify_ordinance(item: dict[str, Any]) -> dict[str, Any] | None:
-        async with sem:
-            try:
-                matched = await compare_ordinance(
-                    q,
-                    mst=str(item["mst"]),
-                    ordin_name=item.get("ordinName") or "",
-                    max_articles=8,
-                    full=False,
-                )
-            except Exception:  # noqa: BLE001
-                return None
-            hit_count = int(matched.get("total") or 0)
-            if hit_count <= 0:
-                return None
-            verified = dict(item)
-            verified["hitCount"] = hit_count
-            instrument = matched.get("instrument") or {}
-            for key in (
-                "ordinId",
-                "ordinName",
-                "orgName",
-                "ordinKind",
-                "effectiveDate",
-                "promulgationDate",
-                "detailUrl",
-                "sourceUrl",
-            ):
-                if instrument.get(key):
-                    verified[key] = instrument[key]
-            return verified
-
-    verified_list = await asyncio.gather(*[verify_ordinance(item) for item in candidates])
-    ordinances = [item for item in verified_list if item]
-    ordinances.sort(key=lambda item: -int(item.get("hitCount") or 0))
-    return ordinances[:display]
+    return results
 
 
 def parse_ymd(value: str | int | None) -> date | None:
