@@ -336,7 +336,7 @@ function renderCompare(data) {
     : `「${escapeHtml(baseName)}」 관련 조문`;
   const scopeDescription = isFull
     ? "선택한 법률과 대응 시행령·시행규칙의 전체 조문을 키워드 필터 없이 표시합니다."
-    : `노란색 표시는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 일치 조문이 없는 법령은 표시하지 않습니다.`;
+    : `노란 강조는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 복합어는 나뉜 단어도 함께 표시합니다. 일치 조문이 없는 법령은 표시하지 않습니다.`;
 
   if (!visibleCats.length) {
     compareEl.innerHTML = `

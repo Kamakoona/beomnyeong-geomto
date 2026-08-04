@@ -19,11 +19,31 @@ export function queryTerms(query) {
   const parts = q.split(/[\s,/·ㆍ]+/).filter((t) => t.length >= 2);
   const terms = [];
   const seen = new Set();
-  for (const term of [q, ...parts]) {
-    if (!term || seen.has(term)) continue;
+
+  const add = (term) => {
+    if (!term || term.length < 2 || seen.has(term)) return;
     seen.add(term);
     terms.push(term);
+  };
+
+  for (const term of [q, ...parts]) {
+    add(term);
+    // 띄어쓰기 없는 한글 복합어(예: 수용재결)도 분절해 강조
+    if (/^[가-힣]{4,10}$/.test(term)) {
+      if (term.length === 4) {
+        add(term.slice(0, 2));
+        add(term.slice(2));
+      } else {
+        for (const cut of [2, 3]) {
+          if (term.length - cut >= 2) {
+            add(term.slice(0, cut));
+            add(term.slice(cut));
+          }
+        }
+      }
+    }
   }
+  // 긴 키워드부터 치환해 부분 중복 하이라이트 깨짐을 줄임
   terms.sort((a, b) => b.length - a.length);
   return terms;
 }
