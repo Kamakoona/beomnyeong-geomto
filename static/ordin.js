@@ -147,7 +147,7 @@ function renderArticles(data) {
           ${
             isFull
               ? "선택한 자치법규의 전체 조문을 표시합니다."
-              : `노란 강조는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 복합어는 나뉜 단어도 함께 표시합니다.`
+              : `노란색 표시는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다.`
           }
         </p>
       </div>
