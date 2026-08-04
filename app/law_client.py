@@ -1261,7 +1261,9 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
 
     results = await asyncio.gather(*tasks)
     ai_articles = results[0]
-    body_and_name_hits = merge_laws(*results[1:])
+    # results[1]=body query, [2]=body primary, [3]=name primary, then part pairs...
+    body_hits = merge_laws(results[1], results[2])
+    name_hits = merge_laws(results[3], *results[4:]) if len(results) > 4 else results[3]
 
     # AI가 추천한 법령은 본문 미포함/의미검색 오탐이 있어 전부 검증 후보로만 사용
     from_ai: list[dict[str, Any]] = []
@@ -1286,10 +1288,18 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
             }
         )
 
-    # AI·본문·이름검색 후보를 실제 조문으로 검증
-    candidates = merge_laws(from_ai, body_and_name_hits)
+    # 이름검색(핵심어) 후보를 앞에 두어 관련 법률이 검증 한도에 들어가게 함
+    # 예: 수용재결 → 수용 이름검색 1순위 「공익사업을 위한 토지…법률」
+    candidates = merge_laws(name_hits, body_hits, from_ai)
+    # 핵심어가 법령명에 있는 항목을 추가로 앞에 고정
+    named_boost = [
+        law
+        for law in candidates
+        if primary and primary in (law.get("lawName") or "")
+    ]
+    candidates = merge_laws(named_boost, candidates)
     # 검증 비용 제한: 상위 소수만 본문 확인
-    candidates = candidates[: min(max(display, 16), 28)]
+    candidates = candidates[: min(max(display, 20), 32)]
 
     sem = asyncio.Semaphore(8)
 
