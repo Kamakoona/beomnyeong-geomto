@@ -146,32 +146,65 @@ def query_tokens(query: str) -> list[str]:
     # dedupe preserving order
     seen: set[str] = set()
     result: list[str] = []
-    for token in tokens:
-        if token not in seen:
+
+    def add(token: str) -> None:
+        if token and len(token) >= 2 and token not in seen:
             seen.add(token)
             result.append(token)
+
+    for token in tokens:
+        add(token)
+        # 띄어쓰기 없는 한글 복합어(예: 수용재결)는 의미 단위로 분절
+        if re.fullmatch(r"[가-힣]{4,10}", token):
+            if len(token) == 4:
+                add(token[:2])
+                add(token[2:])
+            else:
+                for cut in (2, 3):
+                    if len(token) - cut >= 2:
+                        add(token[:cut])
+                        add(token[cut:])
     return result
+
+
+def matching_tokens(query: str, tokens: list[str] | None = None) -> list[str]:
+    """조문 일치 판정에 쓰는 토큰(AND). 복합어면 분절 토큰을 사용한다."""
+    q = (query or "").strip()
+    toks = list(tokens if tokens is not None else query_tokens(q))
+    if not toks:
+        return []
+    if q and len(toks) > 1 and toks[0] == q:
+        parts = [t for t in toks[1:] if t != q]
+        if parts:
+            return parts
+    return toks
 
 
 def primary_keyword(query: str, tokens: list[str]) -> str:
     """검색어에서 법령명 조회용 핵심 키워드를 고른다."""
     if not tokens:
         return query.strip()
-    # 띄어쓰기 없는 단일 토큰 중 가장 긴 것 우선
+    q = query.strip()
+    # 복합어 분절이 있으면 첫 분절(예: 수용재결 → 수용)을 법령명 검색에 우선
+    parts = matching_tokens(q, tokens)
+    if parts and (len(parts) > 1 or (q and parts[0] != q)):
+        return max(parts, key=lambda t: (len(t), t == parts[0]))
     return max(tokens, key=lambda t: (len(t), t == tokens[0]))
 
 
 def text_matches(text: str, tokens: list[str], full_query: str = "") -> bool:
     if not text:
         return False
-    if full_query and full_query in text:
+    q = (full_query or "").strip()
+    if q and q in text:
         return True
-    if not tokens:
+    match_set = matching_tokens(q, tokens) if q else list(tokens or [])
+    if not match_set:
         return True
-    if len(tokens) == 1:
-        return tokens[0] in text
-    # 문장·복수 키워드: 모든 토큰이 조문에 포함
-    return all(token in text for token in tokens)
+    if len(match_set) == 1:
+        return match_set[0] in text
+    # 복수 키워드/복합어 분절: 모든 토큰이 같은 조문에 포함
+    return all(token in text for token in match_set)
 
 
 def normalize_article(raw: dict[str, Any], *, fallback_category: str | None = None) -> dict[str, Any]:
@@ -1210,16 +1243,25 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     """
     tokens = query_tokens(query)
     primary = primary_keyword(query, tokens)
+    parts = matching_tokens(query, tokens)
 
     client = await get_http_client()
-    tasks = [
+    tasks: list = [
         search_ai_articles(client, query, min(display, 40)),
         search_laws(client, query, search=2, display=20),
         search_laws(client, primary, search=2, display=20),
+        # 복합어·핵심어 이름검색으로 관련 법률 후보를 보강 (예: 수용재결 → 수용)
+        search_laws(client, primary, search=1, display=15),
     ]
+    for part in parts[:2]:
+        if part == query.strip():
+            continue
+        tasks.append(search_laws(client, part, search=1, display=12))
+        tasks.append(search_laws(client, part, search=2, display=12))
+
     results = await asyncio.gather(*tasks)
     ai_articles = results[0]
-    body_hits = merge_laws(results[1], results[2])
+    body_and_name_hits = merge_laws(*results[1:])
 
     # AI가 추천한 법령은 본문 미포함/의미검색 오탐이 있어 전부 검증 후보로만 사용
     from_ai: list[dict[str, Any]] = []
@@ -1244,10 +1286,10 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
             }
         )
 
-    # 이름만 비슷한 법령은 제외하고, AI·본문검색 후보만 실제 조문으로 검증
-    candidates = merge_laws(from_ai, body_hits)
-    # 검증 비용 제한: 상위 소수만 본문 확인 (기존 max(display*2,40) → 최대 24)
-    candidates = candidates[: min(max(display, 16), 24)]
+    # AI·본문·이름검색 후보를 실제 조문으로 검증
+    candidates = merge_laws(from_ai, body_and_name_hits)
+    # 검증 비용 제한: 상위 소수만 본문 확인
+    candidates = candidates[: min(max(display, 16), 28)]
 
     sem = asyncio.Semaphore(8)
 
