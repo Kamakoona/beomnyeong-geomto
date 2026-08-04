@@ -1248,8 +1248,9 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     client = await get_http_client()
     tasks: list = [
         search_ai_articles(client, query, min(display, 40)),
-        search_laws(client, query, search=2, display=20),
-        search_laws(client, primary, search=2, display=20),
+        # 본문검색은 순위가 낮아도 관련 법률이 있을 수 있어 넉넉히 가져온다
+        search_laws(client, query, search=2, display=50),
+        search_laws(client, primary, search=2, display=30),
         # 복합어·핵심어 이름검색으로 관련 법률 후보를 보강 (예: 수용재결 → 수용)
         search_laws(client, primary, search=1, display=15),
     ]
@@ -1257,7 +1258,7 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
         if part == query.strip():
             continue
         tasks.append(search_laws(client, part, search=1, display=12))
-        tasks.append(search_laws(client, part, search=2, display=12))
+        tasks.append(search_laws(client, part, search=2, display=20))
 
     results = await asyncio.gather(*tasks)
     ai_articles = results[0]
@@ -1288,18 +1289,45 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
             }
         )
 
-    # 이름검색(핵심어) 후보를 앞에 두어 관련 법률이 검증 한도에 들어가게 함
-    # 예: 수용재결 → 수용 이름검색 1순위 「공익사업을 위한 토지…법률」
-    candidates = merge_laws(name_hits, body_hits, from_ai)
-    # 핵심어가 법령명에 있는 항목을 추가로 앞에 고정
+    # 시행령·시행규칙 후보가 있으면 대응 법률도 후보에 넣는다
+    # (예: 영업손실 → AI가 공익사업법 시행규칙만 줄 때 법률·시행령도 검증)
+    parent_seeds = merge_laws(from_ai, body_hits, name_hits)
+    parent_names: list[str] = []
+    seen_parent: set[str] = set()
+    for law in parent_seeds:
+        name = (law.get("lawName") or "").strip()
+        base = ""
+        for suffix in (" 시행규칙", " 시행령"):
+            if name.endswith(suffix):
+                base = name[: -len(suffix)].strip()
+                break
+        if base and base not in seen_parent:
+            seen_parent.add(base)
+            parent_names.append(base)
+    parent_hits: list[dict[str, Any]] = []
+    if parent_names:
+        parent_results = await asyncio.gather(
+            *[search_laws(client, name, search=1, display=5) for name in parent_names[:8]]
+        )
+        for name, hits in zip(parent_names[:8], parent_results, strict=False):
+            exact = next((h for h in hits if (h.get("lawName") or "") == name), None)
+            if exact:
+                parent_hits.append(exact)
+                continue
+            soft = next((h for h in hits if name in (h.get("lawName") or "")), None)
+            if soft:
+                parent_hits.append(soft)
+
+    # 이름검색·모법 후보를 앞에 두어 검증 한도에 들어가게 함
+    candidates = merge_laws(parent_hits, name_hits, body_hits, from_ai)
     named_boost = [
         law
         for law in candidates
         if primary and primary in (law.get("lawName") or "")
     ]
     candidates = merge_laws(named_boost, candidates)
-    # 검증 비용 제한: 상위 소수만 본문 확인
-    candidates = candidates[: min(max(display, 20), 32)]
+    # 검증 비용 제한
+    candidates = candidates[: min(max(display, 24), 40)]
 
     sem = asyncio.Semaphore(8)
 
