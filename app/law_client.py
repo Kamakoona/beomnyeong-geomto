@@ -295,7 +295,10 @@ async def search_laws(
 
 
 async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str, Any]]:
-    """키워드 본문검색으로 자치법규 목록을 반환한다."""
+    """키워드 본문검색으로 자치법규 목록을 반환한다.
+
+    Open API 검색 후보 중, 실제 조문 본문에 키워드가 있는 항목만 남긴다.
+    """
     q = (query or "").strip()
     if not q:
         return []
@@ -308,13 +311,13 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
             "target": "ordin",
             "query": q,
             "search": 2,
-            "display": min(display, 50),
+            "display": min(max(display * 2, 40), 50),
             "page": 1,
         },
     )
     root = data.get("OrdinSearch") or {}
     items = as_list(root.get("law"))
-    results: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in items:
         if not isinstance(item, dict):
@@ -342,7 +345,7 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
             if mst
             else portal
         )
-        results.append(
+        candidates.append(
             {
                 "ordinId": ordin_id,
                 "mst": mst,
@@ -354,10 +357,47 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
                 "promulgationDate": format_date(item.get("공포일자")),
                 "detailUrl": detail,
                 "sourceUrl": portal,
+                "hitCount": 0,
             }
         )
-    return results
 
+    # 검증 비용 제한: 상위 후보만 실제 조문 본문으로 확인
+    candidates = [c for c in candidates if c.get("mst")][: min(max(display, 20), 36)]
+    if not candidates:
+        return []
+
+    sem = asyncio.Semaphore(6)
+
+    async def verify(item: dict[str, Any]) -> dict[str, Any] | None:
+        async with sem:
+            try:
+                checked = await compare_ordinance(
+                    q,
+                    mst=str(item["mst"]),
+                    ordin_name=item.get("ordinName") or "",
+                    max_articles=5,
+                    full=False,
+                )
+            except Exception:  # noqa: BLE001
+                return None
+            articles = checked.get("articles") or []
+            if not articles:
+                return None
+            out = dict(item)
+            out["hitCount"] = int(checked.get("total") or len(articles))
+            instrument = checked.get("instrument") or {}
+            if instrument.get("ordinName"):
+                out["ordinName"] = instrument["ordinName"]
+            if instrument.get("orgName"):
+                out["orgName"] = instrument["orgName"]
+            if instrument.get("effectiveDate"):
+                out["effectiveDate"] = instrument["effectiveDate"]
+            return out
+
+    verified = await asyncio.gather(*[verify(item) for item in candidates])
+    results = [item for item in verified if item]
+    results.sort(key=lambda item: (-int(item.get("hitCount") or 0), item.get("ordinName") or ""))
+    return results[:display]
 
 def parse_ymd(value: str | int | None) -> date | None:
     text = re.sub(r"\D", "", str(value or ""))

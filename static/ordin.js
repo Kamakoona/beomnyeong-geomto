@@ -185,36 +185,50 @@ function renderList(items, query) {
   markListReady();
   pageTitle.textContent = `「${query}」 자치법규`;
   document.title = `${query} · 자치법규`;
-  if (scopeLead) {
-    scopeLead.innerHTML = `
-    검색어 <em>${escapeHtml(query)}</em>가 포함된 자치법규 ${items.length}건입니다.
-    항목을 선택하면 법률 3단 검색과 같은 형태로 관련 조문을 보여 줍니다.
-  `;
-  }
   scopePill.hidden = true;
   scopePill.innerHTML = "";
   setOpenAllVisible(false);
   workspaceEl.hidden = true;
   listEl.hidden = false;
 
+  const listItems = items.some((item) => "hitCount" in item)
+    ? items.filter((item) => Number(item.hitCount || 0) > 0)
+    : items;
+
+  if (!listItems.length) {
+    if (scopeLead) {
+      scopeLead.innerHTML = `
+        검색어 <em>${escapeHtml(query)}</em>와 일치하는 조문이 있는 자치법규가 없습니다.
+      `;
+    }
+    metaEl.hidden = false;
+    metaEl.innerHTML = `
+      <span>검색어 <strong>${escapeHtml(query)}</strong></span>
+      <span class="pill">자치법규 0건</span>
+    `;
+    listEl.innerHTML = `<div class="empty">키워드와 일치하는 조문이 있는 자치법규가 없습니다.</div>`;
+    return;
+  }
+
+  if (scopeLead) {
+    scopeLead.innerHTML = `
+    검색어 <em>${escapeHtml(query)}</em>가 조문에 포함된 자치법규 ${listItems.length}건입니다.
+    항목을 선택하면 법률 3단 검색과 같은 형태로 관련 조문을 보여 줍니다.
+  `;
+  }
   metaEl.hidden = false;
   metaEl.innerHTML = `
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
-    <span class="pill">자치법규 ${items.length}건</span>
+    <span class="pill">자치법규 ${listItems.length}건</span>
   `;
-
-  if (!items.length) {
-    listEl.innerHTML = `<div class="empty">일치하는 자치법규가 없습니다.</div>`;
-    return;
-  }
 
   listEl.innerHTML = `
     <div class="law-list-head">
       <h2>자치법규 선택</h2>
-      <p class="law-list-sub">선택하면 이 창에서 관련 조문을 법률 검색 결과와 같은 형태로 엽니다.</p>
+      <p class="law-list-sub">키워드와 일치하는 조문이 있는 자치법규만 표시합니다.</p>
     </div>
     <div class="law-grid">
-      ${items
+      ${listItems
         .map(
           (item) => `
         <button
@@ -229,6 +243,7 @@ function renderList(items, query) {
           <span class="law-card-meta">
             ${item.orgName ? `<span>${escapeHtml(item.orgName)}</span>` : ""}
             ${item.effectiveDate ? `<span>시행 ${escapeHtml(item.effectiveDate)}</span>` : ""}
+            ${item.hitCount ? `<span>관련조문 ${item.hitCount}</span>` : ""}
           </span>
           <span class="law-card-action">조문 보기 →</span>
         </button>`
