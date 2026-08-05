@@ -478,16 +478,9 @@ async def search_ordinance_list(
                 out["effectiveDate"] = instrument["effectiveDate"]
             return out
 
-    # 배치 검증: 필요한 건수가 모이면 조기 종료
-    results: list[dict[str, Any]] = []
-    batch_size = 12
-    for i in range(0, len(candidates), batch_size):
-        if len(results) >= display:
-            break
-        batch = candidates[i : i + batch_size]
-        verified = await asyncio.gather(*[verify(item) for item in batch])
-        results.extend(item for item in verified if item)
-
+    # 후보 전체를 검증한 뒤 hitCount로 정렬해야 상위 결과가 왜곡되지 않음
+    verified = await asyncio.gather(*[verify(item) for item in candidates])
+    results = [item for item in verified if item]
     results.sort(key=lambda item: (-int(item.get("hitCount") or 0), item.get("ordinName") or ""))
     return results[:display]
 
