@@ -1,8 +1,9 @@
 import {
   escapeHtml,
   setStatus as setStatusEl,
-  detectHangulCompound,
+  detectMatchChoice,
   normalizeMatchMode,
+  matchModePromptHtml,
 } from "./shared.js";
 
 const form = document.getElementById("search-form");
@@ -18,7 +19,7 @@ const chips = document.getElementById("chips");
 let latestOrdinances = [];
 let searchAbort = null;
 let activeMatchMode = "";
-let pendingCompoundQuery = "";
+let pendingMatchQuery = "";
 
 function setSearching(isSearching) {
   button.disabled = isSearching;
@@ -65,48 +66,27 @@ function hideOrdinancePrompt() {
   if (el) el.remove();
 }
 
-function hideCompoundPrompt() {
+function hideMatchModePrompt() {
   const el = document.getElementById("compound-prompt");
   if (el) el.remove();
-  pendingCompoundQuery = "";
+  pendingMatchQuery = "";
 }
 
-function showCompoundPrompt(compound) {
-  hideCompoundPrompt();
+function showMatchModePrompt(choice) {
+  hideMatchModePrompt();
   hideOrdinancePrompt();
-  pendingCompoundQuery = compound.full;
+  pendingMatchQuery = choice.full;
   const prompt = document.createElement("section");
   prompt.id = "compound-prompt";
   prompt.className = "compound-prompt";
-  prompt.innerHTML = `
-    <div class="compound-prompt-card">
-      <div>
-        <p class="compound-prompt-kicker">복합 검색어</p>
-        <h2>「${escapeHtml(compound.full)}」은 「${escapeHtml(compound.left)}」와 「${escapeHtml(
-          compound.right
-        )}」가 합쳐진 검색어로 보입니다.</h2>
-        <p class="compound-prompt-ask">어떻게 검색할까요?</p>
-      </div>
-      <div class="compound-prompt-actions">
-        <button type="button" class="prompt-primary" data-match-mode="exact">
-          ${escapeHtml(compound.full)}만
-        </button>
-        <button type="button" class="prompt-secondary" data-match-mode="and">
-          ${escapeHtml(compound.left)} AND ${escapeHtml(compound.right)}
-        </button>
-        <button type="button" class="prompt-secondary" data-match-mode="or">
-          ${escapeHtml(compound.left)} OR ${escapeHtml(compound.right)}
-        </button>
-      </div>
-    </div>
-  `;
+  prompt.innerHTML = matchModePromptHtml(choice, { askText: "어떻게 검색할까요?" });
   const anchor = statusEl || form;
   anchor.insertAdjacentElement("afterend", prompt);
   prompt.querySelectorAll("[data-match-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = normalizeMatchMode(btn.getAttribute("data-match-mode"));
-      const q = pendingCompoundQuery || compound.full;
-      hideCompoundPrompt();
+      const q = pendingMatchQuery || choice.full;
+      hideMatchModePrompt();
       runSearch(q, { matchMode: mode, skipCompoundAsk: true });
     });
   });
@@ -287,8 +267,8 @@ async function runSearch(query, options = {}) {
 
   const skipAsk = Boolean(options.skipCompoundAsk);
   const requestedMode = options.matchMode ? normalizeMatchMode(options.matchMode) : "";
-  const compound = detectHangulCompound(q);
-  if (compound && !skipAsk && !requestedMode) {
+  const choice = detectMatchChoice(q);
+  if (choice && !skipAsk && !requestedMode) {
     setSearching(false);
     setStatus("");
     metaEl.hidden = true;
@@ -296,11 +276,11 @@ async function runSearch(query, options = {}) {
     lawListEl.innerHTML = "";
     latestOrdinances = [];
     hideOrdinancePrompt();
-    showCompoundPrompt(compound);
+    showMatchModePrompt(choice);
     return;
   }
 
-  const matchMode = requestedMode || (compound ? "and" : "");
+  const matchMode = requestedMode || (choice ? "and" : "");
   activeMatchMode = matchMode;
 
   if (searchAbort) searchAbort.abort();
@@ -317,7 +297,7 @@ async function runSearch(query, options = {}) {
   lawListEl._matchMode = activeMatchMode;
   latestOrdinances = [];
   hideOrdinancePrompt();
-  hideCompoundPrompt();
+  hideMatchModePrompt();
 
   const next = new URL(location.href);
   next.searchParams.set("q", q);
