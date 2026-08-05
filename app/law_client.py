@@ -140,6 +140,27 @@ def jo_param(article_no: str | int | None, branch_no: str | int | None = None) -
     )
 
 
+def normalize_match_mode(mode: str | None) -> str:
+    """검색 일치 방식: exact(원문만) / and(분절 모두) / or(분절 하나라도)."""
+    value = (mode or "and").strip().lower()
+    if value in {"exact", "phrase", "only"}:
+        return "exact"
+    if value in {"or", "any"}:
+        return "or"
+    return "and"
+
+
+def hangul_compound_parts(query: str) -> tuple[str, str] | None:
+    """띄어쓰기 없는 한글 4글자 복합어(예: 영업손실, 수용재결)의 2+2 분절."""
+    q = (query or "").strip()
+    if not re.fullmatch(r"[가-힣]{4}", q):
+        return None
+    left, right = q[:2], q[2:]
+    if len(left) < 2 or len(right) < 2:
+        return None
+    return left, right
+
+
 def query_tokens(query: str) -> list[str]:
     raw = re.split(r"[\s,/·ㆍ]+", query.strip())
     tokens = [t for t in raw if len(t) >= 2]
@@ -192,18 +213,30 @@ def primary_keyword(query: str, tokens: list[str]) -> str:
     return max(tokens, key=lambda t: (len(t), t == tokens[0]))
 
 
-def text_matches(text: str, tokens: list[str], full_query: str = "") -> bool:
+def text_matches(
+    text: str,
+    tokens: list[str],
+    full_query: str = "",
+    *,
+    match_mode: str = "and",
+) -> bool:
     if not text:
         return False
+    mode = normalize_match_mode(match_mode)
     q = (full_query or "").strip()
-    if q and q in text:
-        return True
+    if mode == "exact":
+        return bool(q) and q in text
+
     match_set = matching_tokens(q, tokens) if q else list(tokens or [])
     if not match_set:
         return True
+    if mode == "or":
+        return any(token in text for token in match_set)
+    # and: 원문 구절이 있으면 통과, 없으면 분절 모두 포함
+    if q and q in text:
+        return True
     if len(match_set) == 1:
         return match_set[0] in text
-    # 복수 키워드/복합어 분절: 모든 토큰이 같은 조문에 포함
     return all(token in text for token in match_set)
 
 
@@ -327,7 +360,12 @@ async def search_laws(
     return results
 
 
-async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str, Any]]:
+async def search_ordinance_list(
+    query: str,
+    display: int = 20,
+    *,
+    match_mode: str = "and",
+) -> list[dict[str, Any]]:
     """키워드 본문검색으로 자치법규 목록을 반환한다.
 
     Open API 검색 후보 중, 실제 조문 본문에 키워드가 있는 항목만 남긴다.
@@ -335,6 +373,7 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
     q = (query or "").strip()
     if not q:
         return []
+    mode = normalize_match_mode(match_mode)
 
     client = await get_http_client()
     data = await fetch_json(
@@ -410,6 +449,7 @@ async def search_ordinance_list(query: str, display: int = 20) -> list[dict[str,
                     ordin_name=item.get("ordinName") or "",
                     max_articles=5,
                     full=False,
+                    match_mode=mode,
                 )
             except Exception:  # noqa: BLE001
                 return None
@@ -1010,6 +1050,7 @@ async def fetch_law_articles(
     max_articles: int = 30,
     fallback_primary: bool = True,
     rich: bool = True,
+    match_mode: str = "and",
 ) -> list[dict[str, Any]]:
     data = await fetch_json(
         client,
@@ -1070,7 +1111,12 @@ async def fetch_law_articles(
 
             # 법령명은 매칭에서 제외해 모든 조문이 히트되는 것을 방지
             haystack = f"{title}\n{content}"
-            if match_tokens and not text_matches(haystack, match_tokens, full_query=full_query):
+            if match_tokens and not text_matches(
+                haystack,
+                match_tokens,
+                full_query=full_query,
+                match_mode=match_mode,
+            ):
                 continue
 
             article_no = unit.get("조문번호")
@@ -1235,12 +1281,18 @@ def pick_companion_laws(
     }
 
 
-async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]:
+async def search_law_list(
+    query: str,
+    display: int = 30,
+    *,
+    match_mode: str = "and",
+) -> list[dict[str, Any]]:
     """키워드와 관련된 법령(우선 법률) 목록을 반환한다.
 
     AI/이름 검색 후보는 참고만 하고, 실제 조문 본문에 키워드가 포함된
     법령만 최종 목록에 올린다. (상세 3단 검색과 동일 기준)
     """
+    mode = normalize_match_mode(match_mode)
     tokens = query_tokens(query)
     primary = primary_keyword(query, tokens)
     parts = matching_tokens(query, tokens)
@@ -1251,25 +1303,36 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
     short_query = len(query.strip()) <= 3
     body_display = 160 if short_query else 50
     primary_body_display = 80 if short_query else 30
-    tasks: list = [
-        search_ai_articles(client, query, min(display, 40)),
-        # 본문검색은 순위가 낮아도 관련 법률이 있을 수 있어 넉넉히 가져온다
-        search_laws(client, query, search=2, display=body_display),
-        search_laws(client, primary, search=2, display=primary_body_display),
-        # 복합어·핵심어 이름검색으로 관련 법률 후보를 보강 (예: 수용재결 → 수용)
-        search_laws(client, primary, search=1, display=15),
-    ]
-    for part in parts[:2]:
-        if part == query.strip():
-            continue
-        tasks.append(search_laws(client, part, search=1, display=12))
-        tasks.append(search_laws(client, part, search=2, display=20))
+    if mode == "exact":
+        tasks: list = [
+            search_ai_articles(client, query, min(display, 40)),
+            search_laws(client, query, search=2, display=body_display),
+            search_laws(client, query, search=1, display=20),
+        ]
+    else:
+        tasks = [
+            search_ai_articles(client, query, min(display, 40)),
+            # 본문검색은 순위가 낮아도 관련 법률이 있을 수 있어 넉넉히 가져온다
+            search_laws(client, query, search=2, display=body_display),
+            search_laws(client, primary, search=2, display=primary_body_display),
+            # 복합어·핵심어 이름검색으로 관련 법률 후보를 보강 (예: 수용재결 → 수용)
+            search_laws(client, primary, search=1, display=15),
+        ]
+        for part in parts[:2]:
+            if part == query.strip():
+                continue
+            tasks.append(search_laws(client, part, search=1, display=12))
+            tasks.append(search_laws(client, part, search=2, display=20))
 
     results = await asyncio.gather(*tasks)
     ai_articles = results[0]
-    # results[1]=body query, [2]=body primary, [3]=name primary, then part pairs...
-    body_hits = merge_laws(results[1], results[2])
-    name_hits = merge_laws(results[3], *results[4:]) if len(results) > 4 else results[3]
+    if mode == "exact":
+        body_hits = results[1]
+        name_hits = results[2]
+    else:
+        # results[1]=body query, [2]=body primary, [3]=name primary, then part pairs...
+        body_hits = merge_laws(results[1], results[2])
+        name_hits = merge_laws(results[3], *results[4:]) if len(results) > 4 else results[3]
 
     # AI가 추천한 법령은 본문 미포함/의미검색 오탐이 있어 전부 검증 후보로만 사용
     from_ai: list[dict[str, Any]] = []
@@ -1425,6 +1488,7 @@ async def search_law_list(query: str, display: int = 30) -> list[dict[str, Any]]
                     max_articles=8,
                     fallback_primary=False,
                     rich=False,
+                    match_mode=mode,
                 )
             except Exception:  # noqa: BLE001
                 return None
@@ -1784,6 +1848,7 @@ async def _load_instrument_column(
     full_query: str,
     max_articles: int,
     fallback_primary: bool,
+    match_mode: str = "and",
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None]:
     if not law:
         return label, [], None
@@ -1794,6 +1859,7 @@ async def _load_instrument_column(
         full_query=full_query,
         max_articles=max_articles,
         fallback_primary=fallback_primary,
+        match_mode=match_mode,
     )
     articles = sort_articles(dedupe_articles(articles))
     try:
@@ -1822,8 +1888,11 @@ async def compare_three_tier(
     law_id: str,
     law_name: str = "",
     max_articles: int = 40,
+    *,
+    match_mode: str = "and",
 ) -> dict[str, Any]:
     """선택한 법률과 관련 시행령·시행규칙의 관련 조문을 3단으로 반환."""
+    mode = normalize_match_mode(match_mode)
     tokens = query_tokens(query)
 
     client = await get_http_client()
@@ -1843,6 +1912,7 @@ async def compare_three_tier(
                 full_query=query,
                 max_articles=max_articles,
                 fallback_primary=False,
+                match_mode=mode,
             )
             for label, law in targets
         ]
@@ -1945,9 +2015,11 @@ async def compare_ordinance(
     ordin_name: str = "",
     max_articles: int = 80,
     full: bool = False,
+    match_mode: str = "and",
 ) -> dict[str, Any]:
     """선택한 자치법규에서 키워드 일치 조문(또는 전체 조문)을 반환한다."""
     mst = str(mst or "").strip()
+    mode = normalize_match_mode(match_mode)
     if not mst:
         return {
             "query": query,
@@ -2017,7 +2089,12 @@ async def compare_ordinance(
             continue
 
         haystack = f"{title}\n{content}"
-        if tokens and not text_matches(haystack, tokens, full_query=query):
+        if tokens and not text_matches(
+            haystack,
+            tokens,
+            full_query=query,
+            match_mode=mode,
+        ):
             continue
 
         label = format_article_label(jo_no, jo_branch)

@@ -3,6 +3,8 @@ import {
   encodeLawUrl,
   highlightText,
   setStatus as setStatusEl,
+  detectHangulCompound,
+  normalizeMatchMode,
 } from "./shared.js";
 
 const params = new URLSearchParams(location.search);
@@ -11,6 +13,8 @@ const lawName = (params.get("lawName") || "").trim();
 const initialQuery = (params.get("q") || "").trim();
 const modeParam = (params.get("mode") || "").trim().toLowerCase();
 const mode = modeParam === "full" ? "full" : "scoped";
+let activeMatchMode = normalizeMatchMode(params.get("matchMode") || "") || "";
+let pendingCompoundQuery = "";
 
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
@@ -30,6 +34,50 @@ const COLUMN_ORDER = ["법률", "시행령", "시행규칙"];
 
 let currentQuery = "";
 
+function hideCompoundPrompt() {
+  const el = document.getElementById("compound-prompt");
+  if (el) el.remove();
+  pendingCompoundQuery = "";
+}
+
+function showCompoundPrompt(compound) {
+  hideCompoundPrompt();
+  pendingCompoundQuery = compound.full;
+  const prompt = document.createElement("section");
+  prompt.id = "compound-prompt";
+  prompt.className = "compound-prompt";
+  prompt.innerHTML = `
+    <div class="compound-prompt-card">
+      <div>
+        <p class="compound-prompt-kicker">복합 검색어</p>
+        <h2>「${escapeHtml(compound.full)}」은 「${escapeHtml(compound.left)}」와 「${escapeHtml(
+          compound.right
+        )}」가 합쳐진 검색어로 보입니다.</h2>
+        <p class="compound-prompt-ask">이 법령 범위에서 어떻게 검색할까요?</p>
+      </div>
+      <div class="compound-prompt-actions">
+        <button type="button" class="prompt-primary" data-match-mode="exact">
+          ${escapeHtml(compound.full)}만
+        </button>
+        <button type="button" class="prompt-secondary" data-match-mode="and">
+          ${escapeHtml(compound.left)} AND ${escapeHtml(compound.right)}
+        </button>
+        <button type="button" class="prompt-secondary" data-match-mode="or">
+          ${escapeHtml(compound.left)} OR ${escapeHtml(compound.right)}
+        </button>
+      </div>
+    </div>
+  `;
+  statusEl.insertAdjacentElement("afterend", prompt);
+  prompt.querySelectorAll("[data-match-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const chosen = normalizeMatchMode(btn.getAttribute("data-match-mode"));
+      const q = pendingCompoundQuery || compound.full;
+      hideCompoundPrompt();
+      runScopedSearch(q, { matchMode: chosen, skipCompoundAsk: true });
+    });
+  });
+}
 function openFullArticlesWindow() {
   if (!lawId) {
     setStatus("법률을 먼저 선택한 뒤 전체 조문을 열어 주세요.", true);
@@ -426,10 +474,24 @@ async function refreshArticle(articleEl) {
   }
 }
 
-async function runScopedSearch(query) {
+async function runScopedSearch(query, options = {}) {
   const q = query.trim();
   if (!q || !lawId) return;
 
+  const skipAsk = Boolean(options.skipCompoundAsk);
+  const requestedMode = options.matchMode ? normalizeMatchMode(options.matchMode) : "";
+  const compound = detectHangulCompound(q);
+  if (compound && !skipAsk && !requestedMode) {
+    button.disabled = false;
+    button.textContent = "조문 검색";
+    setStatus("");
+    workspaceEl.hidden = true;
+    showCompoundPrompt(compound);
+    return;
+  }
+
+  const matchMode = requestedMode || (compound ? "and" : "");
+  activeMatchMode = matchMode;
   currentQuery = q;
   button.disabled = true;
   button.textContent = "검색 중…";
@@ -440,10 +502,13 @@ async function runScopedSearch(query) {
   scopePill.innerHTML = "";
   compareEl.innerHTML = `<div class="empty">조문을 불러오는 중…</div>`;
   hideOrdinancePrompt();
+  hideCompoundPrompt();
 
   const next = new URL(location.href);
   next.searchParams.set("q", q);
   next.searchParams.delete("mode");
+  if (activeMatchMode) next.searchParams.set("matchMode", activeMatchMode);
+  else next.searchParams.delete("matchMode");
   history.replaceState(null, "", next);
 
   try {
@@ -453,6 +518,7 @@ async function runScopedSearch(query) {
       lawName: lawName || "",
       maxArticles: "50",
     });
+    if (activeMatchMode) searchParams.set("matchMode", activeMatchMode);
     const res = await fetch(`/api/compare?${searchParams}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "조문 검색에 실패했습니다.");
@@ -562,7 +628,11 @@ function setupPage() {
     runFullArticles();
   } else if (initialQuery) {
     input.value = initialQuery;
-    runScopedSearch(initialQuery);
+    const modeFromUrl = normalizeMatchMode(params.get("matchMode") || "");
+    runScopedSearch(
+      initialQuery,
+      modeFromUrl ? { matchMode: modeFromUrl, skipCompoundAsk: true } : {}
+    );
   }
 }
 

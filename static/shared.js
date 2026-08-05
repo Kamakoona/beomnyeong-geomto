@@ -13,6 +13,22 @@ export function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** 띄어쓰기 없는 한글 4글자 복합어(예: 영업손실, 수용재결) → { full, left, right } */
+export function detectHangulCompound(query) {
+  const q = String(query || "").trim();
+  if (!/^[가-힣]{4}$/.test(q)) return null;
+  return { full: q, left: q.slice(0, 2), right: q.slice(2) };
+}
+
+export function normalizeMatchMode(mode) {
+  const value = String(mode || "").trim().toLowerCase();
+  if (!value) return "";
+  if (value === "exact" || value === "phrase" || value === "only") return "exact";
+  if (value === "or" || value === "any") return "or";
+  if (value === "and" || value === "all") return "and";
+  return "";
+}
+
 export function queryTerms(query) {
   const q = (query || "").trim();
   if (!q) return [];

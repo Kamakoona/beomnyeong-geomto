@@ -174,6 +174,7 @@ async def law_image(flSeq: str = Query(..., min_length=1, pattern=r"^\d+$")) -> 
 async def search(
     q: str = Query(..., min_length=1, description="검색 키워드 또는 문장"),
     display: int = Query(30, ge=5, le=80),
+    match_mode: str = Query("and", alias="matchMode", description="exact | and | or"),
 ) -> dict:
     """관련 조문이 있는 법령(법률 우선) 목록을 반환한다."""
     query = q.strip()
@@ -182,8 +183,8 @@ async def search(
 
     try:
         laws, ordinances = await asyncio.gather(
-            search_law_list(query, display=display),
-            search_ordinance_list(query, display=30),
+            search_law_list(query, display=display, match_mode=match_mode),
+            search_ordinance_list(query, display=30, match_mode=match_mode),
             return_exceptions=True,
         )
     except Exception as exc:  # noqa: BLE001
@@ -196,6 +197,7 @@ async def search(
 
     return {
         "query": query,
+        "matchMode": match_mode,
         "total": len(laws),
         "laws": laws,
         "ordinances": ordinances,
@@ -209,6 +211,7 @@ async def search(
 async def ordinances(
     q: str = Query(..., min_length=1, description="검색 키워드 또는 문장"),
     display: int = Query(30, ge=5, le=80),
+    match_mode: str = Query("and", alias="matchMode", description="exact | and | or"),
 ) -> dict:
     """키워드가 포함된 자치법규 목록을 반환한다."""
     query = q.strip()
@@ -216,12 +219,13 @@ async def ordinances(
         raise HTTPException(status_code=400, detail="검색어를 입력해 주세요.")
 
     try:
-        items = await search_ordinance_list(query, display=display)
+        items = await search_ordinance_list(query, display=display, match_mode=match_mode)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"자치법규 검색 실패: {exc}") from exc
 
     return {
         "query": query,
+        "matchMode": match_mode,
         "total": len(items),
         "ordinances": items,
         "source": "https://www.law.go.kr (자치법규 Open API)",
@@ -235,6 +239,7 @@ async def ordin_compare(
     ordin_name: str = Query("", alias="ordinName"),
     max_articles: int = Query(80, ge=5, le=300, alias="maxArticles"),
     mode: str = Query("search", description="search | full"),
+    match_mode: str = Query("and", alias="matchMode", description="exact | and | or"),
 ) -> dict:
     """선택한 자치법규의 키워드 일치 조문(또는 전체 조문)을 반환한다."""
     query = q.strip()
@@ -249,6 +254,7 @@ async def ordin_compare(
             ordin_name=ordin_name,
             max_articles=max_articles,
             full=full,
+            match_mode=match_mode,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"자치법규 조문 조회 실패: {exc}") from exc
@@ -262,6 +268,7 @@ async def compare(
     law_id: str = Query(..., alias="lawId", min_length=1),
     law_name: str = Query("", alias="lawName"),
     max_articles: int = Query(40, ge=5, le=80, alias="maxArticles"),
+    match_mode: str = Query("and", alias="matchMode", description="exact | and | or"),
 ) -> dict:
     """선택한 법률과 관련 시행령·시행규칙 조문을 3단으로 반환한다."""
     query = q.strip()
@@ -274,6 +281,7 @@ async def compare(
             law_id=law_id,
             law_name=law_name,
             max_articles=max_articles,
+            match_mode=match_mode,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"3단 조문 조회 실패: {exc}") from exc

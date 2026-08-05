@@ -1,4 +1,9 @@
-import { escapeHtml, setStatus as setStatusEl } from "./shared.js";
+import {
+  escapeHtml,
+  setStatus as setStatusEl,
+  detectHangulCompound,
+  normalizeMatchMode,
+} from "./shared.js";
 
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
@@ -12,6 +17,8 @@ const chips = document.getElementById("chips");
 
 let latestOrdinances = [];
 let searchAbort = null;
+let activeMatchMode = "";
+let pendingCompoundQuery = "";
 
 function setSearching(isSearching) {
   button.disabled = isSearching;
@@ -48,12 +55,61 @@ function openInNewTab(url) {
 function openOrdinanceTab(query) {
   const q = String(query || "").trim();
   if (!q) return;
-  openInNewTab(`/ordin?q=${encodeURIComponent(q)}`);
+  const params = new URLSearchParams({ q });
+  if (activeMatchMode) params.set("matchMode", activeMatchMode);
+  openInNewTab(`/ordin?${params.toString()}`);
 }
 
 function hideOrdinancePrompt() {
   const el = document.getElementById("ordinance-prompt");
   if (el) el.remove();
+}
+
+function hideCompoundPrompt() {
+  const el = document.getElementById("compound-prompt");
+  if (el) el.remove();
+  pendingCompoundQuery = "";
+}
+
+function showCompoundPrompt(compound) {
+  hideCompoundPrompt();
+  hideOrdinancePrompt();
+  pendingCompoundQuery = compound.full;
+  const prompt = document.createElement("section");
+  prompt.id = "compound-prompt";
+  prompt.className = "compound-prompt";
+  prompt.innerHTML = `
+    <div class="compound-prompt-card">
+      <div>
+        <p class="compound-prompt-kicker">복합 검색어</p>
+        <h2>「${escapeHtml(compound.full)}」은 「${escapeHtml(compound.left)}」와 「${escapeHtml(
+          compound.right
+        )}」가 합쳐진 검색어로 보입니다.</h2>
+        <p class="compound-prompt-ask">어떻게 검색할까요?</p>
+      </div>
+      <div class="compound-prompt-actions">
+        <button type="button" class="prompt-primary" data-match-mode="exact">
+          ${escapeHtml(compound.full)}만
+        </button>
+        <button type="button" class="prompt-secondary" data-match-mode="and">
+          ${escapeHtml(compound.left)} AND ${escapeHtml(compound.right)}
+        </button>
+        <button type="button" class="prompt-secondary" data-match-mode="or">
+          ${escapeHtml(compound.left)} OR ${escapeHtml(compound.right)}
+        </button>
+      </div>
+    </div>
+  `;
+  const anchor = statusEl || form;
+  anchor.insertAdjacentElement("afterend", prompt);
+  prompt.querySelectorAll("[data-match-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = normalizeMatchMode(btn.getAttribute("data-match-mode"));
+      const q = pendingCompoundQuery || compound.full;
+      hideCompoundPrompt();
+      runSearch(q, { matchMode: mode, skipCompoundAsk: true });
+    });
+  });
 }
 
 function ordinanceSamples(ordinances) {
@@ -108,12 +164,14 @@ function showOrdinancePrompt(query, ordinances) {
   bindOrdinancePromptActions(prompt, query);
 }
 
-function openLawWindow(lawId, lawName, query) {
+function openLawWindow(lawId, lawName, query, matchMode = "") {
   const params = new URLSearchParams({
     lawId,
     lawName: lawName || "",
   });
   if (query) params.set("q", query);
+  const mode = normalizeMatchMode(matchMode || activeMatchMode);
+  if (mode) params.set("matchMode", mode);
   const url = `/law?${params.toString()}`;
   const win = window.open(url, "_blank");
   if (win) {
@@ -153,12 +211,16 @@ function lawCardHtml(law) {
     </button>`;
 }
 
-function renderSearchMeta(query, laws) {
+function renderSearchMeta(query, laws, matchMode = "") {
   const statuteCount = laws.filter((l) => l.category === "법률").length;
   const ordinCount = latestOrdinances.length;
+  const mode = normalizeMatchMode(matchMode || activeMatchMode);
+  const modeLabel =
+    mode === "exact" ? "원문만" : mode === "or" ? "OR" : mode === "and" ? "AND" : "";
   metaEl.hidden = false;
   metaEl.innerHTML = `
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
+    ${modeLabel ? `<span class="pill">일치: ${modeLabel}</span>` : ""}
     <span class="pill">관련 법령 ${laws.length}건</span>
     ${statuteCount ? `<span class="pill">법률 ${statuteCount}건</span>` : ""}
     ${ordinCount ? `<span class="pill">자치법규 ${ordinCount}건</span>` : ""}
@@ -172,9 +234,9 @@ function renderSearchMeta(query, laws) {
   `;
 }
 
-function renderLawList(laws, query, { expanded = false } = {}) {
+function renderLawList(laws, query, { expanded = false, matchMode = "" } = {}) {
   if (!laws.length) {
-    renderSearchMeta(query, laws);
+    renderSearchMeta(query, laws, matchMode);
     if (latestOrdinances.length) {
       lawListEl.innerHTML = `
         <div class="empty empty-with-ordinance">
@@ -193,7 +255,7 @@ function renderLawList(laws, query, { expanded = false } = {}) {
   const visible = expanded || !hasMore ? laws : laws.slice(0, INITIAL_LAW_LIMIT);
   const remaining = laws.length - INITIAL_LAW_LIMIT;
 
-  renderSearchMeta(query, laws);
+  renderSearchMeta(query, laws, matchMode);
 
   lawListEl.innerHTML = `
     <div class="law-list-head">
@@ -216,11 +278,30 @@ function renderLawList(laws, query, { expanded = false } = {}) {
 
   lawListEl._laws = laws;
   lawListEl._query = query;
+  lawListEl._matchMode = matchMode || activeMatchMode;
 }
 
-async function runSearch(query) {
+async function runSearch(query, options = {}) {
   const q = query.trim();
   if (!q) return;
+
+  const skipAsk = Boolean(options.skipCompoundAsk);
+  const requestedMode = options.matchMode ? normalizeMatchMode(options.matchMode) : "";
+  const compound = detectHangulCompound(q);
+  if (compound && !skipAsk && !requestedMode) {
+    setSearching(false);
+    setStatus("");
+    metaEl.hidden = true;
+    metaEl.innerHTML = "";
+    lawListEl.innerHTML = "";
+    latestOrdinances = [];
+    hideOrdinancePrompt();
+    showCompoundPrompt(compound);
+    return;
+  }
+
+  const matchMode = requestedMode || (compound ? "and" : "");
+  activeMatchMode = matchMode;
 
   if (searchAbort) searchAbort.abort();
   const controller = new AbortController();
@@ -233,11 +314,24 @@ async function runSearch(query) {
   lawListEl.innerHTML = "";
   lawListEl._laws = [];
   lawListEl._query = q;
+  lawListEl._matchMode = activeMatchMode;
   latestOrdinances = [];
   hideOrdinancePrompt();
+  hideCompoundPrompt();
+
+  const next = new URL(location.href);
+  next.searchParams.set("q", q);
+  if (activeMatchMode) next.searchParams.set("matchMode", activeMatchMode);
+  else next.searchParams.delete("matchMode");
+  history.replaceState(null, "", next);
 
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&display=80`, {
+    const params = new URLSearchParams({
+      q,
+      display: "80",
+    });
+    if (activeMatchMode) params.set("matchMode", activeMatchMode);
+    const res = await fetch(`/api/search?${params}`, {
       signal: controller.signal,
     });
     const data = await res.json();
@@ -246,7 +340,9 @@ async function runSearch(query) {
     setStatus("");
     const laws = Array.isArray(data.laws) ? data.laws : [];
     latestOrdinances = Array.isArray(data.ordinances) ? data.ordinances : [];
-    renderLawList(laws, data.query || q, { expanded: false });
+    const usedMode = normalizeMatchMode(data.matchMode || activeMatchMode);
+    activeMatchMode = usedMode || activeMatchMode;
+    renderLawList(laws, data.query || q, { expanded: false, matchMode: activeMatchMode });
     if (latestOrdinances.length) {
       showOrdinancePrompt(data.query || q, latestOrdinances);
     }
@@ -291,17 +387,24 @@ lawListEl.addEventListener("click", (event) => {
   if (moreBtn) {
     renderLawList(lawListEl._laws || [], lawListEl._query || input.value.trim(), {
       expanded: true,
+      matchMode: lawListEl._matchMode || activeMatchMode,
     });
     return;
   }
 
   const card = event.target.closest("[data-open-law]");
   if (!card) return;
-  openLawWindow(card.dataset.lawId, card.dataset.lawName, input.value.trim());
+  openLawWindow(
+    card.dataset.lawId,
+    card.dataset.lawName,
+    input.value.trim(),
+    lawListEl._matchMode || activeMatchMode
+  );
 });
 
 const params = new URLSearchParams(location.search);
 if (params.get("q")) {
   input.value = params.get("q");
-  runSearch(params.get("q"));
+  const mode = params.get("matchMode");
+  runSearch(params.get("q"), mode ? { matchMode: mode, skipCompoundAsk: true } : {});
 }
