@@ -29,7 +29,7 @@ STATIC_DIR = BASE_DIR / "static"
 load_dotenv(BASE_DIR / ".env")
 
 # 크롬 등 강한 캐시를 피하기 위해 배포마다 경로를 바꿈
-APP_BUILD = "20260804i"
+APP_BUILD = "20260805a"
 ASSET_REF_RE = re.compile(r'((?:href|src)=")(/static/[^"?]+)(")')
 HEAD_INJECT = (
     '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />\n'

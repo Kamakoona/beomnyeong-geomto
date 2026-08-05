@@ -115,6 +115,29 @@ body {
   border-bottom-color: currentColor;
 }
 
+.home-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 252, 246, 0.92);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.home-btn:hover {
+  color: var(--accent-deep);
+  border-color: rgba(15, 107, 92, 0.35);
+  background: #fff;
+}
+
 .shell {
   max-width: 1280px;
   margin: 0 auto;
