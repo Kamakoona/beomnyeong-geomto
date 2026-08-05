@@ -2,13 +2,16 @@ import {
   escapeHtml,
   encodeLawUrl,
   highlightText,
+  highlightHintHtml,
   setStatus as setStatusEl,
+  normalizeMatchMode,
 } from "./shared.js";
 
 const params = new URLSearchParams(location.search);
 const initialQuery = (params.get("q") || "").trim();
 const initialMst = (params.get("mst") || "").trim();
 const initialName = (params.get("name") || params.get("ordinName") || "").trim();
+let activeMatchMode = normalizeMatchMode(params.get("matchMode") || "") || "";
 
 let currentQuery = initialQuery;
 let currentMst = initialMst;
@@ -39,7 +42,13 @@ function setStatus(message, isError = false) {
   setStatusEl(statusEl, message, isError);
 }
 
-function syncUrl({ query = currentQuery, mst = currentMst, name = currentName, mode = "" } = {}) {
+function syncUrl({
+  query = currentQuery,
+  mst = currentMst,
+  name = currentName,
+  mode = "",
+  matchMode = activeMatchMode,
+} = {}) {
   const next = new URL(location.href);
   next.searchParams.set("q", query || "");
   if (mst) next.searchParams.set("mst", mst);
@@ -48,10 +57,13 @@ function syncUrl({ query = currentQuery, mst = currentMst, name = currentName, m
   else next.searchParams.delete("name");
   if (mode === "full") next.searchParams.set("mode", "full");
   else next.searchParams.delete("mode");
+  const normalized = normalizeMatchMode(matchMode);
+  if (normalized) next.searchParams.set("matchMode", normalized);
+  else next.searchParams.delete("matchMode");
   history.replaceState(null, "", next);
 }
 
-function articleCard(article, query) {
+function articleCard(article, query, matchMode = activeMatchMode) {
   const titleRaw = article.articleTitle
     ? `${article.articleLabel}(${article.articleTitle})`
     : article.articleLabel;
@@ -59,9 +71,9 @@ function articleCard(article, query) {
   return `
     <article class="tri-article is-compact">
       <div class="tri-article-head">
-        <span class="article-label">${highlightText(titleRaw, query)}</span>
+        <span class="article-label">${highlightText(titleRaw, query, matchMode)}</span>
       </div>
-      <div class="article-body">${highlightText(article.articleContent || "", query)}</div>
+      <div class="article-body">${highlightText(article.articleContent || "", query, matchMode)}</div>
       <div class="article-meta">
         ${article.effectiveDate ? `<span>시행 ${escapeHtml(article.effectiveDate)}</span>` : ""}
         <a
@@ -147,7 +159,7 @@ function renderArticles(data) {
           ${
             isFull
               ? "선택한 자치법규의 전체 조문을 표시합니다."
-              : `노란 강조는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 복합어는 나뉜 단어도 함께 표시합니다.`
+              : highlightHintHtml(query, activeMatchMode)
           }
         </p>
       </div>
@@ -169,7 +181,7 @@ function renderArticles(data) {
           <span class="count">${articles.length}개</span>
         </header>
         <div class="tri-col-body">
-          ${articles.map((a) => articleCard(a, query)).join("")}
+          ${articles.map((a) => articleCard(a, query, activeMatchMode)).join("")}
         </div>
       </section>
     </div>
@@ -284,6 +296,7 @@ async function loadOrdinanceArticles({ query, mst, name, full = false } = {}) {
       mode: full ? "full" : "search",
     });
     if (!full) searchParams.set("q", currentQuery);
+    if (!full && activeMatchMode) searchParams.set("matchMode", activeMatchMode);
     const res = await fetch(`/api/ordin-compare?${searchParams}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "조문 검색에 실패했습니다.");
@@ -308,7 +321,9 @@ async function loadOrdinanceList(query) {
   input.value = q;
   setStatus("자치법규를 검색하는 중입니다…");
   try {
-    const res = await fetch(`/api/ordinances?q=${encodeURIComponent(q)}&display=50`);
+    const listParams = new URLSearchParams({ q, display: "50" });
+    if (activeMatchMode) listParams.set("matchMode", activeMatchMode);
+    const res = await fetch(`/api/ordinances?${listParams}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "자치법규 검색에 실패했습니다.");
     setStatus("");

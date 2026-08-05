@@ -2,6 +2,7 @@ import {
   escapeHtml,
   encodeLawUrl,
   highlightText,
+  highlightHintHtml,
   setStatus as setStatusEl,
   detectHangulCompound,
   normalizeMatchMode,
@@ -206,10 +207,10 @@ function openExternalWindow(url) {
   }
 }
 
-function renderContentBlocks(blocks, query, fallbackText) {
+function renderContentBlocks(blocks, query, fallbackText, matchMode = activeMatchMode) {
   const list = Array.isArray(blocks) ? blocks : [];
   if (!list.length) {
-    return `<div class="article-body">${highlightText(fallbackText || "", query)}</div>`;
+    return `<div class="article-body">${highlightText(fallbackText || "", query, matchMode)}</div>`;
   }
 
   return `<div class="article-body rich-body">${list
@@ -232,7 +233,7 @@ function renderContentBlocks(blocks, query, fallbackText) {
             </a>
           </figure>`;
       }
-      return `<div class="article-text">${highlightText(block?.text || "", query)}</div>`;
+      return `<div class="article-text">${highlightText(block?.text || "", query, matchMode)}</div>`;
     })
     .join("")}</div>`;
 }
@@ -240,8 +241,10 @@ function renderContentBlocks(blocks, query, fallbackText) {
 function openOrdinanceTab(query) {
   const q = String(query || "").trim();
   if (!q) return;
+  const params = new URLSearchParams({ q });
+  if (activeMatchMode) params.set("matchMode", activeMatchMode);
   const a = document.createElement("a");
-  a.href = `/ordin?q=${encodeURIComponent(q)}`;
+  a.href = `/ordin?${params.toString()}`;
   a.target = "_blank";
   a.rel = "noopener noreferrer";
   document.body.appendChild(a);
@@ -297,7 +300,9 @@ async function maybeOfferOrdinances(query) {
   const q = String(query || "").trim();
   if (!q) return;
   try {
-    const res = await fetch(`/api/ordinances?q=${encodeURIComponent(q)}&display=30`);
+    const params = new URLSearchParams({ q, display: "30" });
+    if (activeMatchMode) params.set("matchMode", activeMatchMode);
+    const res = await fetch(`/api/ordinances?${params}`);
     const data = await res.json();
     if (!res.ok) return;
     const items = Array.isArray(data.ordinances) ? data.ordinances : [];
@@ -307,7 +312,7 @@ async function maybeOfferOrdinances(query) {
   }
 }
 
-function articleCard(article, query) {
+function articleCard(article, query, matchMode = activeMatchMode) {
   const titleRaw = article.articleTitle
     ? `${article.articleLabel}(${article.articleTitle})`
     : article.articleLabel;
@@ -318,9 +323,9 @@ function articleCard(article, query) {
       article.joParam
     )}">
       <div class="tri-article-head">
-        <span class="article-label">${highlightText(titleRaw, query)}</span>
+        <span class="article-label">${highlightText(titleRaw, query, matchMode)}</span>
       </div>
-      ${renderContentBlocks(article.contentBlocks, query, article.articleContent)}
+      ${renderContentBlocks(article.contentBlocks, query, article.articleContent, matchMode)}
       <div class="article-meta">
         ${article.effectiveDate ? `<span>조문 시행 ${escapeHtml(article.effectiveDate)}</span>` : ""}
         <a
@@ -384,7 +389,7 @@ function renderCompare(data) {
     : `「${escapeHtml(baseName)}」 관련 조문`;
   const scopeDescription = isFull
     ? "선택한 법률과 대응 시행령·시행규칙의 전체 조문을 키워드 필터 없이 표시합니다."
-    : `노란 강조는 검색어 <mark class="hit inline-hit">${escapeHtml(query)}</mark> 와 일치하는 부분입니다. 복합어는 나뉜 단어도 함께 표시합니다. 일치 조문이 없는 법령은 표시하지 않습니다.`;
+    : `${highlightHintHtml(query, activeMatchMode)} 일치 조문이 없는 법령은 표시하지 않습니다.`;
 
   if (!visibleCats.length) {
     compareEl.innerHTML = `
@@ -436,7 +441,7 @@ function renderCompare(data) {
               <span class="count">${articles.length}개</span>
             </header>
             <div class="tri-col-body">
-              ${articles.map((a) => articleCard(a, query)).join("")}
+              ${articles.map((a) => articleCard(a, query, activeMatchMode)).join("")}
             </div>
           </section>`;
         })

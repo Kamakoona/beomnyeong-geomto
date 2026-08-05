@@ -29,9 +29,16 @@ export function normalizeMatchMode(mode) {
   return "";
 }
 
-export function queryTerms(query) {
+export function queryTerms(query, matchMode = "") {
   const q = (query || "").trim();
   if (!q) return [];
+  const mode = normalizeMatchMode(matchMode);
+
+  // exact(원문만): 분절하지 않고 입력 구절 그대로만 강조
+  if (mode === "exact") {
+    return q.length >= 2 ? [q] : [];
+  }
+
   const parts = q.split(/[\s,/·ㆍ]+/).filter((t) => t.length >= 2);
   const terms = [];
   const seen = new Set();
@@ -44,7 +51,7 @@ export function queryTerms(query) {
 
   for (const term of [q, ...parts]) {
     add(term);
-    // 띄어쓰기 없는 한글 복합어(예: 수용재결)도 분절해 강조
+    // and/or·기본: 띄어쓰기 없는 한글 복합어(예: 수용재결)도 분절해 강조
     if (/^[가-힣]{4,10}$/.test(term)) {
       if (term.length === 4) {
         add(term.slice(0, 2));
@@ -64,9 +71,9 @@ export function queryTerms(query) {
   return terms;
 }
 
-export function highlightText(text, query) {
+export function highlightText(text, query, matchMode = "") {
   const source = String(text ?? "");
-  const terms = queryTerms(query);
+  const terms = queryTerms(query, matchMode);
   if (!terms.length) return escapeHtml(source);
 
   const escaped = escapeHtml(source);
@@ -79,6 +86,27 @@ export function highlightText(text, query) {
   } catch {
     return escaped;
   }
+}
+
+/** 결과 화면용 강조 안내 문구 (선택 matchMode와 맞춤) */
+export function highlightHintHtml(query, matchMode = "") {
+  const q = String(query || "").trim();
+  if (!q) return "";
+  const mode = normalizeMatchMode(matchMode);
+  const compound = detectHangulCompound(q);
+  const qMark = `<mark class="hit inline-hit">${escapeHtml(q)}</mark>`;
+
+  if (mode === "exact" || !compound) {
+    return `노란 강조는 검색어 ${qMark} 와 일치하는 부분입니다.`;
+  }
+
+  const leftMark = `<mark class="hit inline-hit">${escapeHtml(compound.left)}</mark>`;
+  const rightMark = `<mark class="hit inline-hit">${escapeHtml(compound.right)}</mark>`;
+  if (mode === "or") {
+    return `노란 강조는 검색어 ${qMark} 또는 나뉜 단어(${leftMark}, ${rightMark})와 일치하는 부분입니다.`;
+  }
+  // and
+  return `노란 강조는 검색어 ${qMark} 및 나뉜 단어(${leftMark}, ${rightMark})와 일치하는 부분입니다.`;
 }
 
 export function encodeLawUrl(url) {
