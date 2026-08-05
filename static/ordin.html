@@ -89,7 +89,7 @@
             status.hidden = false;
             status.textContent = "자치법규를 검색하는 중입니다…";
           }
-          fetch(`/api/ordinances?q=${encodeURIComponent(q)}&display=50`)
+          fetch(`/api/ordinances?q=${encodeURIComponent(q)}&display=200`)
             .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
             .then(({ ok, d }) => {
               if (!ok) throw new Error(d.detail || "검색 실패");

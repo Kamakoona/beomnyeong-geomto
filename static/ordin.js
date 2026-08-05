@@ -13,10 +13,14 @@ const initialMst = (params.get("mst") || "").trim();
 const initialName = (params.get("name") || params.get("ordinName") || "").trim();
 let activeMatchMode = normalizeMatchMode(params.get("matchMode") || "") || "";
 
+const INITIAL_ORDIN_LIMIT = 50;
+const ORDIN_MORE_STEP = 30;
+
 let currentQuery = initialQuery;
 let currentMst = initialMst;
 let currentName = initialName;
 let latestList = [];
+let listVisibleCount = INITIAL_ORDIN_LIMIT;
 
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
@@ -192,7 +196,7 @@ function markListReady() {
   if (listEl) listEl.dataset.ready = "1";
 }
 
-function renderList(items, query) {
+function renderList(items, query, { visibleCount = INITIAL_ORDIN_LIMIT } = {}) {
   latestList = items;
   markListReady();
   pageTitle.textContent = `「${query}」 자치법규`;
@@ -208,6 +212,7 @@ function renderList(items, query) {
     : items;
 
   if (!listItems.length) {
+    listVisibleCount = INITIAL_ORDIN_LIMIT;
     if (scopeLead) {
       scopeLead.innerHTML = `
         검색어 <em>${escapeHtml(query)}</em>와 일치하는 조문이 있는 자치법규가 없습니다.
@@ -222,6 +227,12 @@ function renderList(items, query) {
     return;
   }
 
+  listVisibleCount = Math.min(Math.max(visibleCount, INITIAL_ORDIN_LIMIT), listItems.length);
+  const visible = listItems.slice(0, listVisibleCount);
+  const remaining = listItems.length - visible.length;
+  const nextBatch = Math.min(ORDIN_MORE_STEP, remaining);
+  const hasMore = remaining > 0;
+
   if (scopeLead) {
     scopeLead.innerHTML = `
     검색어 <em>${escapeHtml(query)}</em>가 조문에 포함된 자치법규 ${listItems.length}건입니다.
@@ -232,6 +243,11 @@ function renderList(items, query) {
   metaEl.innerHTML = `
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
     <span class="pill">자치법규 ${listItems.length}건</span>
+    ${
+      hasMore
+        ? `<span class="pill">${visible.length}건 표시 중</span>`
+        : ""
+    }
   `;
 
   listEl.innerHTML = `
@@ -240,7 +256,7 @@ function renderList(items, query) {
       <p class="law-list-sub">키워드와 일치하는 조문이 있는 자치법규만 표시합니다.</p>
     </div>
     <div class="law-grid">
-      ${listItems
+      ${visible
         .map(
           (item) => `
         <button
@@ -262,6 +278,15 @@ function renderList(items, query) {
         )
         .join("")}
     </div>
+    ${
+      hasMore
+        ? `<div class="law-list-more">
+            <button type="button" class="more-btn" data-show-more-ordin>
+              더보기 <span class="more-count">(+${nextBatch})</span>
+            </button>
+          </div>`
+        : ""
+    }
   `;
 }
 
@@ -321,14 +346,14 @@ async function loadOrdinanceList(query) {
   input.value = q;
   setStatus("자치법규를 검색하는 중입니다…");
   try {
-    const listParams = new URLSearchParams({ q, display: "50" });
+    const listParams = new URLSearchParams({ q, display: "200" });
     if (activeMatchMode) listParams.set("matchMode", activeMatchMode);
     const res = await fetch(`/api/ordinances?${listParams}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "자치법규 검색에 실패했습니다.");
     setStatus("");
     const items = data.ordinances || [];
-    renderList(items, data.query || q);
+    renderList(items, data.query || q, { visibleCount: INITIAL_ORDIN_LIMIT });
 
     if (currentMst) {
       const hit = items.find((item) => String(item.mst) === String(currentMst));
@@ -360,6 +385,14 @@ openAllBtn?.addEventListener("click", () => {
 });
 
 listEl?.addEventListener("click", (event) => {
+  const moreBtn = event.target.closest("[data-show-more-ordin]");
+  if (moreBtn) {
+    renderList(latestList, currentQuery, {
+      visibleCount: listVisibleCount + ORDIN_MORE_STEP,
+    });
+    return;
+  }
+
   const card = event.target.closest("[data-open-ordin]");
   if (!card) return;
   loadOrdinanceArticles({
@@ -375,7 +408,7 @@ metaEl?.addEventListener("click", (event) => {
   currentMst = "";
   currentName = "";
   syncUrl({ query: currentQuery, mst: "", name: "" });
-  renderList(latestList, currentQuery);
+  renderList(latestList, currentQuery, { visibleCount: listVisibleCount });
 });
 
 try {

@@ -210,7 +210,7 @@ async def search(
 @app.get("/api/ordinances")
 async def ordinances(
     q: str = Query(..., min_length=1, description="검색 키워드 또는 문장"),
-    display: int = Query(30, ge=5, le=80),
+    display: int = Query(30, ge=5, le=200),
     match_mode: str = Query("and", alias="matchMode", description="exact | and | or"),
 ) -> dict:
     """키워드가 포함된 자치법규 목록을 반환한다."""

@@ -374,67 +374,78 @@ async def search_ordinance_list(
     if not q:
         return []
     mode = normalize_match_mode(match_mode)
+    display = max(1, int(display))
 
     client = await get_http_client()
-    data = await fetch_json(
-        client,
-        "lawSearch.do",
-        {
-            "target": "ordin",
-            "query": q,
-            "search": 2,
-            "display": min(max(display * 2, 40), 50),
-            "page": 1,
-        },
-    )
-    root = data.get("OrdinSearch") or {}
-    items = as_list(root.get("law"))
+    # 검증에서 탈락하는 후보가 있어 display보다 넉넉히 수집
+    candidate_target = min(max(display * 2, 40), 250)
+    page_size = 100
+    max_pages = 5
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        mst = str(item.get("자치법규일련번호") or "").strip()
-        ordin_id = str(item.get("자치법규ID") or "").strip()
-        key = mst or ordin_id
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        name = item.get("자치법규명") or ""
-        org = item.get("지자체기관명") or ""
-        # 법률의 /법령/{이름} 과 같은 포털 본문 화면 (DRF HTML 뷰어가 아님)
-        portal = (
-            f"https://www.law.go.kr/자치법규/{name}"
-            if name
-            else (
+
+    for page in range(1, max_pages + 1):
+        if len(candidates) >= candidate_target:
+            break
+        data = await fetch_json(
+            client,
+            "lawSearch.do",
+            {
+                "target": "ordin",
+                "query": q,
+                "search": 2,
+                "display": page_size,
+                "page": page,
+            },
+        )
+        root = data.get("OrdinSearch") or {}
+        items = as_list(root.get("law"))
+        if not items:
+            break
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            mst = str(item.get("자치법규일련번호") or "").strip()
+            ordin_id = str(item.get("자치법규ID") or "").strip()
+            key = mst or ordin_id
+            if not mst or not key or key in seen:
+                continue
+            seen.add(key)
+            name = item.get("자치법규명") or ""
+            org = item.get("지자체기관명") or ""
+            # 법률의 /법령/{이름} 과 같은 포털 본문 화면 (DRF HTML 뷰어가 아님)
+            portal = (
+                f"https://www.law.go.kr/자치법규/{name}"
+                if name
+                else (
+                    f"https://www.law.go.kr/LSW/ordinInfoP.do"
+                    f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
+                )
+            )
+            detail = (
                 f"https://www.law.go.kr/LSW/ordinInfoP.do"
                 f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
             )
-        )
-        detail = (
-            f"https://www.law.go.kr/LSW/ordinInfoP.do"
-            f"?ordinSeq={mst}&chrClsCd=010202&gubun=ELIS"
-            if mst
-            else portal
-        )
-        candidates.append(
-            {
-                "ordinId": ordin_id,
-                "mst": mst,
-                "ordinName": name,
-                "orgName": org,
-                "ordinKind": item.get("자치법규종류") or "",
-                "category": "자치법규",
-                "effectiveDate": format_date(item.get("시행일자")),
-                "promulgationDate": format_date(item.get("공포일자")),
-                "detailUrl": detail,
-                "sourceUrl": portal,
-                "hitCount": 0,
-            }
-        )
+            candidates.append(
+                {
+                    "ordinId": ordin_id,
+                    "mst": mst,
+                    "ordinName": name,
+                    "orgName": org,
+                    "ordinKind": item.get("자치법규종류") or "",
+                    "category": "자치법규",
+                    "effectiveDate": format_date(item.get("시행일자")),
+                    "promulgationDate": format_date(item.get("공포일자")),
+                    "detailUrl": detail,
+                    "sourceUrl": portal,
+                    "hitCount": 0,
+                }
+            )
+            if len(candidates) >= candidate_target:
+                break
+        if len(items) < page_size:
+            break
 
-    # 검증 비용 제한: 상위 후보만 실제 조문 본문으로 확인
-    candidates = [c for c in candidates if c.get("mst")][: min(max(display, 20), 36)]
     if not candidates:
         return []
 
@@ -467,8 +478,16 @@ async def search_ordinance_list(
                 out["effectiveDate"] = instrument["effectiveDate"]
             return out
 
-    verified = await asyncio.gather(*[verify(item) for item in candidates])
-    results = [item for item in verified if item]
+    # 배치 검증: 필요한 건수가 모이면 조기 종료
+    results: list[dict[str, Any]] = []
+    batch_size = 12
+    for i in range(0, len(candidates), batch_size):
+        if len(results) >= display:
+            break
+        batch = candidates[i : i + batch_size]
+        verified = await asyncio.gather(*[verify(item) for item in batch])
+        results.extend(item for item in verified if item)
+
     results.sort(key=lambda item: (-int(item.get("hitCount") or 0), item.get("ordinName") or ""))
     return results[:display]
 
