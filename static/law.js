@@ -4,8 +4,9 @@ import {
   highlightText,
   highlightHintHtml,
   setStatus as setStatusEl,
-  detectHangulCompound,
+  detectMatchChoice,
   normalizeMatchMode,
+  matchModePromptHtml,
 } from "./shared.js";
 
 const params = new URLSearchParams(location.search);
@@ -15,7 +16,7 @@ const initialQuery = (params.get("q") || "").trim();
 const modeParam = (params.get("mode") || "").trim().toLowerCase();
 const mode = modeParam === "full" ? "full" : "scoped";
 let activeMatchMode = normalizeMatchMode(params.get("matchMode") || "") || "";
-let pendingCompoundQuery = "";
+let pendingMatchQuery = "";
 
 const form = document.getElementById("search-form");
 const input = document.getElementById("query");
@@ -35,46 +36,27 @@ const COLUMN_ORDER = ["법률", "시행령", "시행규칙"];
 
 let currentQuery = "";
 
-function hideCompoundPrompt() {
+function hideMatchModePrompt() {
   const el = document.getElementById("compound-prompt");
   if (el) el.remove();
-  pendingCompoundQuery = "";
+  pendingMatchQuery = "";
 }
 
-function showCompoundPrompt(compound) {
-  hideCompoundPrompt();
-  pendingCompoundQuery = compound.full;
+function showMatchModePrompt(choice) {
+  hideMatchModePrompt();
+  pendingMatchQuery = choice.full;
   const prompt = document.createElement("section");
   prompt.id = "compound-prompt";
   prompt.className = "compound-prompt";
-  prompt.innerHTML = `
-    <div class="compound-prompt-card">
-      <div>
-        <p class="compound-prompt-kicker">복합 검색어</p>
-        <h2>「${escapeHtml(compound.full)}」은 「${escapeHtml(compound.left)}」와 「${escapeHtml(
-          compound.right
-        )}」가 합쳐진 검색어로 보입니다.</h2>
-        <p class="compound-prompt-ask">이 법령 범위에서 어떻게 검색할까요?</p>
-      </div>
-      <div class="compound-prompt-actions">
-        <button type="button" class="prompt-primary" data-match-mode="exact">
-          ${escapeHtml(compound.full)}만
-        </button>
-        <button type="button" class="prompt-secondary" data-match-mode="and">
-          ${escapeHtml(compound.left)} AND ${escapeHtml(compound.right)}
-        </button>
-        <button type="button" class="prompt-secondary" data-match-mode="or">
-          ${escapeHtml(compound.left)} OR ${escapeHtml(compound.right)}
-        </button>
-      </div>
-    </div>
-  `;
+  prompt.innerHTML = matchModePromptHtml(choice, {
+    askText: "이 법령 범위에서 어떻게 검색할까요?",
+  });
   statusEl.insertAdjacentElement("afterend", prompt);
   prompt.querySelectorAll("[data-match-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const chosen = normalizeMatchMode(btn.getAttribute("data-match-mode"));
-      const q = pendingCompoundQuery || compound.full;
-      hideCompoundPrompt();
+      const q = pendingMatchQuery || choice.full;
+      hideMatchModePrompt();
       runScopedSearch(q, { matchMode: chosen, skipCompoundAsk: true });
     });
   });
@@ -485,17 +467,17 @@ async function runScopedSearch(query, options = {}) {
 
   const skipAsk = Boolean(options.skipCompoundAsk);
   const requestedMode = options.matchMode ? normalizeMatchMode(options.matchMode) : "";
-  const compound = detectHangulCompound(q);
-  if (compound && !skipAsk && !requestedMode) {
+  const choice = detectMatchChoice(q);
+  if (choice && !skipAsk && !requestedMode) {
     button.disabled = false;
     button.textContent = "조문 검색";
     setStatus("");
     workspaceEl.hidden = true;
-    showCompoundPrompt(compound);
+    showMatchModePrompt(choice);
     return;
   }
 
-  const matchMode = requestedMode || (compound ? "and" : "");
+  const matchMode = requestedMode || (choice ? "and" : "");
   activeMatchMode = matchMode;
   currentQuery = q;
   button.disabled = true;
@@ -507,7 +489,7 @@ async function runScopedSearch(query, options = {}) {
   scopePill.innerHTML = "";
   compareEl.innerHTML = `<div class="empty">조문을 불러오는 중…</div>`;
   hideOrdinancePrompt();
-  hideCompoundPrompt();
+  hideMatchModePrompt();
 
   const next = new URL(location.href);
   next.searchParams.set("q", q);

@@ -4,7 +4,9 @@ import {
   highlightText,
   highlightHintHtml,
   setStatus as setStatusEl,
+  detectMatchChoice,
   normalizeMatchMode,
+  matchModePromptHtml,
 } from "./shared.js";
 
 const params = new URLSearchParams(location.search);
@@ -12,6 +14,7 @@ const initialQuery = (params.get("q") || "").trim();
 const initialMst = (params.get("mst") || "").trim();
 const initialName = (params.get("name") || params.get("ordinName") || "").trim();
 let activeMatchMode = normalizeMatchMode(params.get("matchMode") || "") || "";
+let pendingMatchQuery = "";
 
 const INITIAL_ORDIN_LIMIT = 50;
 const ORDIN_MORE_STEP = 30;
@@ -44,6 +47,56 @@ function setOpenAllVisible(visible) {
 
 function setStatus(message, isError = false) {
   setStatusEl(statusEl, message, isError);
+}
+
+function hideMatchModePrompt() {
+  const el = document.getElementById("compound-prompt");
+  if (el) el.remove();
+  pendingMatchQuery = "";
+}
+
+function showMatchModePrompt(choice, onChosen) {
+  hideMatchModePrompt();
+  pendingMatchQuery = choice.full;
+  const prompt = document.createElement("section");
+  prompt.id = "compound-prompt";
+  prompt.className = "compound-prompt";
+  prompt.innerHTML = matchModePromptHtml(choice, {
+    askText: "자치법규에서 어떻게 검색할까요?",
+  });
+  const anchor = statusEl || form;
+  anchor.insertAdjacentElement("afterend", prompt);
+  prompt.querySelectorAll("[data-match-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = normalizeMatchMode(btn.getAttribute("data-match-mode"));
+      const q = pendingMatchQuery || choice.full;
+      hideMatchModePrompt();
+      onChosen(q, mode);
+    });
+  });
+}
+
+/**
+ * 다어휘·복합어면 AND/OR 선택 후 검색. 이미 mode가 있으면 바로 진행.
+ * @returns {boolean} true면 프롬프트를 띄워 호출자가 return해야 함
+ */
+function maybeAskMatchMode(query, options, proceed) {
+  const q = String(query || "").trim();
+  const skipAsk = Boolean(options.skipCompoundAsk);
+  const requestedMode = options.matchMode ? normalizeMatchMode(options.matchMode) : "";
+  const choice = detectMatchChoice(q);
+  if (choice && !skipAsk && !requestedMode) {
+    button.disabled = false;
+    button.textContent = "조문 검색";
+    setStatus("");
+    showMatchModePrompt(choice, (chosenQ, mode) => {
+      proceed(chosenQ, { matchMode: mode, skipCompoundAsk: true });
+    });
+    return true;
+  }
+  const matchMode = requestedMode || (choice ? "and" : activeMatchMode);
+  if (matchMode) activeMatchMode = matchMode;
+  return false;
 }
 
 function syncUrl({
@@ -218,9 +271,13 @@ function renderList(items, query, { visibleCount = INITIAL_ORDIN_LIMIT } = {}) {
         검색어 <em>${escapeHtml(query)}</em>와 일치하는 조문이 있는 자치법규가 없습니다.
       `;
     }
+    const mode = normalizeMatchMode(activeMatchMode);
+    const modeLabel =
+      mode === "exact" ? "원문만" : mode === "or" ? "OR" : mode === "and" ? "AND" : "";
     metaEl.hidden = false;
     metaEl.innerHTML = `
       <span>검색어 <strong>${escapeHtml(query)}</strong></span>
+      ${modeLabel ? `<span class="pill">일치: ${modeLabel}</span>` : ""}
       <span class="pill">자치법규 0건</span>
     `;
     listEl.innerHTML = `<div class="empty">키워드와 일치하는 조문이 있는 자치법규가 없습니다.</div>`;
@@ -239,9 +296,13 @@ function renderList(items, query, { visibleCount = INITIAL_ORDIN_LIMIT } = {}) {
     항목을 선택하면 법률 3단 검색과 같은 형태로 관련 조문을 보여 줍니다.
   `;
   }
+  const mode = normalizeMatchMode(activeMatchMode);
+  const modeLabel =
+    mode === "exact" ? "원문만" : mode === "or" ? "OR" : mode === "and" ? "AND" : "";
   metaEl.hidden = false;
   metaEl.innerHTML = `
     <span>검색어 <strong>${escapeHtml(query)}</strong></span>
+    ${modeLabel ? `<span class="pill">일치: ${modeLabel}</span>` : ""}
     <span class="pill">자치법규 ${listItems.length}건</span>
     ${
       hasMore
@@ -290,16 +351,29 @@ function renderList(items, query, { visibleCount = INITIAL_ORDIN_LIMIT } = {}) {
   `;
 }
 
-async function loadOrdinanceArticles({ query, mst, name, full = false } = {}) {
+async function loadOrdinanceArticles({ query, mst, name, full = false, ...options } = {}) {
   const q = String(query || "").trim();
   const id = String(mst || "").trim();
   if (!id) return;
   if (!full && !q) return;
 
+  if (!full && maybeAskMatchMode(q, options, (chosenQ, nextOpts) => {
+    loadOrdinanceArticles({
+      query: chosenQ,
+      mst: id,
+      name: name || currentName,
+      full: false,
+      ...nextOpts,
+    });
+  })) {
+    return;
+  }
+
   currentMst = id;
   currentName = name || currentName;
   currentQuery = q || currentQuery;
   input.value = currentQuery;
+  hideMatchModePrompt();
 
   button.disabled = true;
   button.textContent = "검색 중…";
@@ -336,15 +410,24 @@ async function loadOrdinanceArticles({ query, mst, name, full = false } = {}) {
   }
 }
 
-async function loadOrdinanceList(query) {
-  const q = query.trim();
+async function loadOrdinanceList(query, options = {}) {
+  const q = String(query || "").trim();
   if (!q) {
     setStatus("검색어가 없습니다.", true);
     return;
   }
+
+  if (maybeAskMatchMode(q, options, (chosenQ, nextOpts) => {
+    loadOrdinanceList(chosenQ, nextOpts);
+  })) {
+    return;
+  }
+
   currentQuery = q;
   input.value = q;
+  hideMatchModePrompt();
   setStatus("자치법규를 검색하는 중입니다…");
+  syncUrl({ query: q, mst: currentMst, name: currentName });
   try {
     const listParams = new URLSearchParams({ q, display: "200" });
     if (activeMatchMode) listParams.set("matchMode", activeMatchMode);
@@ -361,6 +444,8 @@ async function loadOrdinanceList(query) {
         query: q,
         mst: currentMst,
         name: hit?.ordinName || currentName,
+        skipCompoundAsk: true,
+        matchMode: activeMatchMode,
       });
     }
   } catch (err) {
@@ -372,6 +457,8 @@ form?.addEventListener("submit", (event) => {
   event.preventDefault();
   const q = input.value.trim();
   if (!q) return;
+  // 새 검색어면 matchMode를 다시 고를 수 있게 초기화
+  activeMatchMode = "";
   if (currentMst) {
     loadOrdinanceArticles({ query: q, mst: currentMst, name: currentName });
   } else {
@@ -399,6 +486,8 @@ listEl?.addEventListener("click", (event) => {
     query: currentQuery || input.value.trim(),
     mst: card.dataset.mst,
     name: card.dataset.name,
+    skipCompoundAsk: true,
+    matchMode: activeMatchMode,
   });
 });
 
@@ -414,8 +503,12 @@ metaEl?.addEventListener("click", (event) => {
 try {
   if (initialQuery) {
     if (input) input.value = initialQuery;
+    const modeFromUrl = normalizeMatchMode(params.get("matchMode") || "");
     setStatus("자치법규를 검색하는 중입니다…");
-    loadOrdinanceList(initialQuery);
+    loadOrdinanceList(
+      initialQuery,
+      modeFromUrl ? { matchMode: modeFromUrl, skipCompoundAsk: true } : {}
+    );
   } else {
     setStatus("검색어(q)가 없습니다. 메인에서 다시 검색해 주세요.", true);
   }

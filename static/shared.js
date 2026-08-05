@@ -20,6 +20,38 @@ export function detectHangulCompound(query) {
   return { full: q, left: q.slice(0, 2), right: q.slice(2) };
 }
 
+/** 공백·구분자로 나뉜 2어휘 이상 검색어 → { full, terms } */
+export function detectMultiWordQuery(query) {
+  const q = String(query || "").trim();
+  if (!q) return null;
+  const terms = q.split(/[\s,/·ㆍ]+/).filter((t) => t.length >= 2);
+  if (terms.length < 2) return null;
+  return { full: q, terms };
+}
+
+/**
+ * AND/OR(·exact) 선택이 필요한 검색어인지 판별.
+ * 복합어(4글자 한글) 우선, 그다음 다어휘.
+ * @returns {{ type: "compound"|"multi", full: string, terms: string[], left?: string, right?: string } | null}
+ */
+export function detectMatchChoice(query) {
+  const compound = detectHangulCompound(query);
+  if (compound) {
+    return {
+      type: "compound",
+      full: compound.full,
+      left: compound.left,
+      right: compound.right,
+      terms: [compound.left, compound.right],
+    };
+  }
+  const multi = detectMultiWordQuery(query);
+  if (multi) {
+    return { type: "multi", full: multi.full, terms: multi.terms };
+  }
+  return null;
+}
+
 export function normalizeMatchMode(mode) {
   const value = String(mode || "").trim().toLowerCase();
   if (!value) return "";
@@ -27,6 +59,44 @@ export function normalizeMatchMode(mode) {
   if (value === "or" || value === "any") return "or";
   if (value === "and" || value === "all") return "and";
   return "";
+}
+
+/** 복합어·다어휘 검색 방식 선택 카드 HTML */
+export function matchModePromptHtml(choice, { askText = "어떻게 검색할까요?" } = {}) {
+  if (!choice?.full || !Array.isArray(choice.terms) || choice.terms.length < 2) return "";
+  const terms = choice.terms;
+  const listed = terms.map((t) => `「${escapeHtml(t)}」`).join(", ");
+  const andLabel = terms.map(escapeHtml).join(" AND ");
+  const orLabel = terms.map(escapeHtml).join(" OR ");
+  const isCompound = choice.type === "compound";
+  const title = isCompound
+    ? `「${escapeHtml(choice.full)}」은 ${listed}로 나눌 수 있는 검색어로 보입니다.`
+    : `「${escapeHtml(choice.full)}」은 ${listed}로 이뤄진 검색어입니다.`;
+  const kicker = isCompound ? "복합 검색어" : "다어휘 검색어";
+  const exactBtn = isCompound
+    ? `<button type="button" class="prompt-primary" data-match-mode="exact">
+          ${escapeHtml(choice.full)}만
+        </button>`
+    : "";
+  const andClass = isCompound ? "prompt-secondary" : "prompt-primary";
+  return `
+    <div class="compound-prompt-card">
+      <div>
+        <p class="compound-prompt-kicker">${kicker}</p>
+        <h2>${title}</h2>
+        <p class="compound-prompt-ask">${escapeHtml(askText)}</p>
+      </div>
+      <div class="compound-prompt-actions">
+        ${exactBtn}
+        <button type="button" class="${andClass}" data-match-mode="and">
+          ${andLabel}
+        </button>
+        <button type="button" class="prompt-secondary" data-match-mode="or">
+          ${orLabel}
+        </button>
+      </div>
+    </div>
+  `;
 }
 
 export function queryTerms(query, matchMode = "") {
@@ -93,20 +163,21 @@ export function highlightHintHtml(query, matchMode = "") {
   const q = String(query || "").trim();
   if (!q) return "";
   const mode = normalizeMatchMode(matchMode);
-  const compound = detectHangulCompound(q);
+  const choice = detectMatchChoice(q);
   const qMark = `<mark class="hit inline-hit">${escapeHtml(q)}</mark>`;
 
-  if (mode === "exact" || !compound) {
+  if (mode === "exact" || !choice || !mode) {
     return `노란 강조는 검색어 ${qMark} 와 일치하는 부분입니다.`;
   }
 
-  const leftMark = `<mark class="hit inline-hit">${escapeHtml(compound.left)}</mark>`;
-  const rightMark = `<mark class="hit inline-hit">${escapeHtml(compound.right)}</mark>`;
+  const termMarks = choice.terms
+    .map((t) => `<mark class="hit inline-hit">${escapeHtml(t)}</mark>`)
+    .join(", ");
   if (mode === "or") {
-    return `노란 강조는 검색어 ${qMark} 또는 나뉜 단어(${leftMark}, ${rightMark})와 일치하는 부분입니다.`;
+    return `노란 강조는 검색어 ${qMark} 또는 나뉜 단어(${termMarks})와 일치하는 부분입니다.`;
   }
   // and
-  return `노란 강조는 검색어 ${qMark} 및 나뉜 단어(${leftMark}, ${rightMark})와 일치하는 부분입니다.`;
+  return `노란 강조는 검색어 ${qMark} 및 나뉜 단어(${termMarks})와 일치하는 부분입니다.`;
 }
 
 export function encodeLawUrl(url) {
